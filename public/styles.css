@@ -73,6 +73,8 @@ button { color: inherit; }
 .card-tools button { padding: 0 11px; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 9px; cursor: pointer; }
 .card-tools button:last-child { width: 42px; border-right: 0; }
 .card-tools button:hover { background: #f0f3f7; color: var(--text); }
+.card-tools .cancel-print { color: var(--red); font-size: 12px; }
+.card-tools .cancel-print:hover { background: #fff0f1; color: #ad1f2c; }
 .add-card { display: flex; flex-direction: column; align-items: center; justify-content: center; border-style: dashed; background: #fbfcfd; color: var(--muted); cursor: pointer; }
 .add-card i { width: 54px; height: 54px; margin-bottom: 16px; display: grid; place-items: center; border-radius: 50%; background: #eef2f7; color: var(--blue); font-size: 27px; font-style: normal; }
 .add-card b { font-size: 11px; }

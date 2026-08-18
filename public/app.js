@@ -301,7 +301,7 @@ function card(printer, index) {
   return `<article class="printer-card status-${printer.status} ${reorderMode ? "reorder-mode" : ""}" data-printer="${printer.id}" draggable="${reorderMode}" style="--accent:${esc(printer.color)}">
     <div class="card-top"><span class="status"><i></i>${statusText[printer.status]}</span><button class="trash" data-delete="${printer.id}" aria-label="${esc(printer.name)} yazıcısını sil">⌫</button></div>
     <button class="printer-main" data-open="${printer.id}" ${reorderMode ? "disabled" : ""}><div class="printer-icon"><span>${icon}${printer.status === "printing" ? `<b>${remaining(printer.endsAt)}</b>` : ""}</span></div><h3>${esc(printer.name)}</h3>${body}</button>
-    ${reorderControls || `<div class="card-tools"><button data-reserve="${printer.id}">▦ Rezerve et</button><button data-edit-printer="${printer.id}">✎ Düzenle</button><button data-maintenance="${printer.id}" aria-label="Bakım">⚙</button></div>`}
+    ${reorderControls || `<div class="card-tools"><button data-reserve="${printer.id}">▦ Rezerve et</button><button data-edit-printer="${printer.id}">✎ Düzenle</button>${printer.status === "printing" ? `<button class="cancel-print" data-cancel-print="${printer.id}" aria-label="Mevcut baskıyı iptal et" title="Mevcut baskıyı iptal et">■</button>` : `<button data-maintenance="${printer.id}" aria-label="Bakım">⚙</button>`}</div>`}
   </article>`;
 }
 
@@ -476,6 +476,7 @@ function bindDynamicControls() {
   document.querySelectorAll("[data-reserve]").forEach(button => button.onclick = () => reserveForm(button.dataset.reserve));
   document.querySelectorAll("[data-edit-printer]").forEach(button => button.onclick = () => editPrinterForm(button.dataset.editPrinter));
   document.querySelectorAll("[data-maintenance]").forEach(button => button.onclick = () => maintenanceForm(button.dataset.maintenance));
+  document.querySelectorAll("[data-cancel-print]").forEach(button => button.onclick = () => cancelCurrentPrint(button.dataset.cancelPrint));
   document.querySelectorAll("[data-edit-queue]").forEach(button => button.onclick = () => editQueueForm(button.dataset.editQueue, button.dataset.job));
   document.querySelectorAll("[data-delete-queue]").forEach(button => button.onclick = () => deleteQueueJob(button.dataset.deleteQueue, button.dataset.job));
   document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = () => cancelReservation(button.dataset.cancelReservation, button.dataset.reservation));
@@ -564,6 +565,22 @@ function clearFinished(printer) {
   const actor = prompt("Yazıcıyı boşaltmak için adınızı girin:")?.trim();
   if (!actor || !confirm(`${printer.name} boşaltılıp uygun olarak işaretlensin mi?`)) return;
   mutate("clearFinished", { printerId: printer.id }, makeEntry("Yazıcı boşaltıldı", `${printer.job} · ${printer.name}`, actor)).catch(() => {});
+}
+
+function cancelCurrentPrint(id) {
+  const printer = printers.find(item => item.id === id);
+  if (!printer || printer.status !== "printing") return toast("Devam eden baskı bulunamadı");
+  showModal(`<form class="form"><h2>Baskıyı iptal et</h2><p class="form-intro"><b>“${esc(printer.job)}”</b> baskısını durdurmak istediğinize emin misiniz?<br><br>${esc(printer.name)} uygun olarak işaretlenecek. Sıradaki işler ve rezervasyonlar silinmeyecektir.</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><button class="submit danger">EVET, BASKIYI İPTAL ET</button></form>`, async event => {
+    event.preventDefault();
+    const actor = String(new FormData(event.currentTarget).get("actor")).trim();
+    const ownPrint = samePerson(actor, printer.owner);
+    const action = ownPrint ? "Baskı sahibi tarafından iptal edildi" : "Baskı başka biri tarafından iptal edildi";
+    const detail = `${printer.job} · ${printer.name} · Baskı sahibi: ${printer.owner}`;
+    closeModal();
+    try {
+      await mutate("cancelCurrentPrint", { printerId: id }, makeEntry(action, detail, actor), "Baskı iptal edildi");
+    } catch (_) {}
+  });
 }
 
 function addForm() {
