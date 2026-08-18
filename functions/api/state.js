@@ -206,6 +206,18 @@ function applyAction(state, body) {
     return;
   }
 
+  if (action === "cancelCurrentPrint") {
+    if (printer.status !== "printing") throw new Error("İptal edilecek devam eden baskı bulunamadı");
+    const next = { ...printer, status: "free" };
+    delete next.job;
+    delete next.owner;
+    delete next.duration;
+    delete next.startedAt;
+    delete next.endsAt;
+    replacePrinter(state, next);
+    return;
+  }
+
   if (action === "editPrinter") {
     const next = { ...printer, name: requireText(body.name, "Yazıcı adı"), color: body.color || printer.color };
     if (printer.job && body.jobName !== undefined) next.job = requireText(body.jobName, "İş adı");
