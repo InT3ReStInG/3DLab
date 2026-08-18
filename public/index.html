@@ -1,10 +1,10 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="tr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#123f73">
-  <meta name="mobile-web-app-capable" content="yes"> 
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Printers Lab 750">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%23123f73'/%3E%3Crect y='56' width='64' height='8' fill='%23d12836'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial,sans-serif' font-size='22' font-weight='700' fill='white'%3E750%3C/text%3E%3C/svg%3E">
@@ -20,10 +20,12 @@
     </section>
     <nav class="tabs" aria-label="Sections">
       <button class="active" data-tab="fleet">Yazıcılar</button>
+      <button data-tab="calendar">Takvim</button>
       <button data-tab="queue">Sıra <span id="queueCount">0</span></button>
       <button data-tab="history">Geçmiş</button>
     </nav>
-    <section id="fleetView"><div class="printer-rail" id="printerRail"></div><div class="lower-grid"><section class="panel"><div class="panel-head"><div><small>İŞLEM KAYITLARI</small><h2>Son işlemler</h2></div><button data-open-tab="history">Tümünü gör →</button></div><div id="recentActivity"></div></section><section class="panel"><div class="panel-head"><div><small>SIRADAKİLER</small><h2>Baskı sırası</h2></div></div><div id="shortQueue"></div></section></div></section>
+    <section id="fleetView"><div class="fleet-toolbar"><span id="reorderHint">Kartlara basarak baskı ekleyebilirsiniz.</span><div><button class="subtle-button hidden" id="cancelReorder">İptal</button><button class="subtle-button" id="reorderButton">↕ Sıralamayı düzenle</button></div></div><div class="printer-rail" id="printerRail"></div><div class="lower-grid"><section class="panel"><div class="panel-head"><div><small>İŞLEM KAYITLARI</small><h2>Son işlemler</h2></div><button data-open-tab="history">Tümünü gör →</button></div><div id="recentActivity"></div></section><section class="panel"><div class="panel-head"><div><small>SIRADAKİLER</small><h2>Baskı sırası</h2></div></div><div id="shortQueue"></div></section></div></section>
+    <section class="panel full hidden" id="calendarView"><div class="calendar-head"><div><small>YAZICI TAKVİMİ</small><h2 id="calendarTitle">Takvim</h2></div><div class="calendar-controls"><div class="segmented"><button id="calendarDay" class="active">Gün</button><button id="calendarWeek">Hafta</button></div><button id="calendarPrev" aria-label="Önceki">←</button><button id="calendarToday">Bugün</button><button id="calendarNext" aria-label="Sonraki">→</button><input id="calendarDate" type="date" aria-label="Tarih seç"></div></div><div id="calendarGrid"></div></section>
     <section class="panel full hidden" id="queueView"><div class="panel-head"><div><small>PLANLANAN İŞLER</small><h2>Sıradaki tüm işler</h2></div></div><div id="allQueue"></div></section>
     <section class="panel full hidden" id="historyView"><div class="panel-head"><div><small>İŞLEM GEÇMİŞİ</small><h2>Genel geçmiş</h2></div></div><div id="allActivity"></div></section>
     <footer><span>Printers Lab 750</span><span>Özel laboratuvar sistemi</span></footer>
