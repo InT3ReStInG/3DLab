@@ -59,6 +59,27 @@ function remaining(at) {
   return hours ? `${hours} sa ${mins} dk` : `${mins} dk`;
 }
 
+function printStartedAt(printer) {
+  if (Number(printer.startedAt)) return Number(printer.startedAt);
+  const matches = activity.filter(entry =>
+    Number(entry.at) <= Number(printer.endsAt)
+    && /Baskı başlatıldı|Sıradaki baskı başlatıldı/.test(String(entry.action || ""))
+    && String(entry.detail || "").includes(String(printer.job || ""))
+  );
+  const strictMatch = matches.find(entry => String(entry.detail || "").includes(String(printer.name || "")));
+  if (strictMatch?.at || matches[0]?.at) return Number(strictMatch?.at || matches[0].at);
+  if (printer.duration) return Number(printer.endsAt) - Number(printer.duration) * 60000;
+  return null;
+}
+
+function printProgress(printer) {
+  if (printer.status === "finished") return 100;
+  const startAt = printStartedAt(printer);
+  const endAt = Number(printer.endsAt);
+  if (!startAt || !endAt || endAt <= startAt) return 0;
+  return Math.max(0, Math.min(100, Math.round((Date.now() - startAt) / (endAt - startAt) * 100)));
+}
+
 function durationText(total) {
   const value = Math.max(1, Number(total) || 1);
   const hours = Math.floor(value / 60);
@@ -266,7 +287,8 @@ function card(printer, index) {
   } else if (printer.status === "maintenance") {
     body = `<p>${esc(printer.maintenanceNote)}</p><span class="maintenance-action">SERVİS DIŞI</span>${availability}`;
   } else {
-    body = `<p class="job">${esc(printer.job)}</p><span class="owner">◯ ${esc(printer.owner)}</span><div class="progress"><i style="width:${printer.status === "finished" ? 100 : 58}%"></i></div><div class="time-row"><span>${printer.status === "finished" ? "Temizlenmeyi bekliyor" : "Tahmini kalan süre"}</span><b>${remaining(printer.endsAt)}</b></div>${queueNote}${availability}`;
+    const progress = printProgress(printer);
+    body = `<p class="job">${esc(printer.job)}</p><span class="owner">◯ ${esc(printer.owner)}</span><div class="progress"><i style="width:${progress}%"></i></div><div class="time-row"><span>İlerleme</span><b>%${progress}</b></div><div class="time-row"><span>${printer.status === "finished" ? "Temizlenmeyi bekliyor" : "Tahmini kalan süre"}</span><b>${remaining(printer.endsAt)}</b></div>${queueNote}${availability}`;
   }
 
   const reorderControls = reorderMode ? `
@@ -312,10 +334,9 @@ function empty(text) {
 function scheduleEvents(printer) {
   const events = [];
   if (["printing", "finished"].includes(printer.status) && printer.endsAt) {
-    const fallbackStart = printer.status === "printing"
-      ? Math.min(Date.now(), printer.endsAt - Math.max(1, Number(printer.duration) || 1) * 60000)
-      : printer.endsAt - Math.max(1, Number(printer.duration) || 1) * 60000;
-    events.push({ type: "print", label: printer.job, owner: printer.owner, startAt: printer.startedAt || fallbackStart, endAt: printer.endsAt });
+    const recoveredStart = printStartedAt(printer);
+    const fallbackStart = printer.status === "printing" ? Math.min(Date.now(), printer.endsAt) : printer.endsAt - 60000;
+    events.push({ type: "print", label: printer.job, owner: printer.owner, startAt: recoveredStart || fallbackStart, endAt: printer.endsAt });
   }
   printer.reservations.forEach(item => events.push({ ...item, type: "reservation", label: item.purpose, reservationId: item.id }));
   queueSlots(printer).forEach(item => events.push({ ...item, type: "queue", label: item.name }));
