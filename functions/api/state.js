@@ -1,55 +1,271 @@
-const json=(body,status=200)=>Response.json(body,{status,headers:{"Cache-Control":"no-store"}});
+const json = (body, status = 200) => Response.json(body, {
+  status,
+  headers: { "Cache-Control": "no-store" },
+});
 
-async function ensureTable(db){
-  await db.prepare("CREATE TABLE IF NOT EXISTS lab_state (id INTEGER PRIMARY KEY, printers TEXT NOT NULL, activity TEXT NOT NULL, updated_at INTEGER NOT NULL)").run();
-  const found=await db.prepare("SELECT id FROM lab_state WHERE id=1").first();
-  if(found)return;
-  const now=Date.now();
-  const printers=[
-    {id:"printer-01",name:"Yazıcı 01",color:"#dc2626",status:"printing",job:"İHA sensör braketi v4",owner:"Ece Yılmaz",endsAt:now+8280000,queue:[{id:"q1",name:"Hava girişi prototipi",owner:"Kerem",duration:150}]},
-    {id:"printer-02",name:"Yazıcı 02",color:"#2563eb",status:"free",queue:[]},
-    {id:"printer-03",name:"Yazıcı 03",color:"#64748b",status:"finished",job:"Kanat nervürü test parçası",owner:"Mert Kaya",endsAt:now-1440000,queue:[]},
-    {id:"printer-04",name:"Yazıcı 04",color:"#64748b",status:"maintenance",maintenanceNote:"Nozul değişimi",queue:[]},
-    {id:"printer-05",name:"Yazıcı 05",color:"#2563eb",status:"free",queue:[{id:"q2",name:"Motor bağlantı parçası",owner:"Selin",duration:95}]}
-  ];
-  const activity=[
-    {id:"a1",action:"Baskı başlatıldı",detail:"İHA sensör braketi v4 · Yazıcı 01",user:"Ece Yılmaz",at:now-2820000},
-    {id:"a2",action:"Baskı tamamlandı",detail:"Kanat nervürü test parçası · Yazıcı 03",user:"Mert Kaya",at:now-4920000},
-    {id:"a3",action:"Bakım modu açıldı",detail:"Nozul değişimi · Yazıcı 04",user:"Laboratuvar Sorumlusu",at:now-11520000}
-  ];
-  await db.prepare("INSERT INTO lab_state (id,printers,activity,updated_at) VALUES (1,?,?,?)").bind(JSON.stringify(printers),JSON.stringify(activity),now).run();
+const overlaps = (startA, endA, startB, endB) => startA < endB && endA > startB;
+const minutes = value => Math.max(1, Math.round(Number(value) || 1));
+
+function normalizePrinter(printer) {
+  return {
+    ...printer,
+    queue: Array.isArray(printer.queue) ? printer.queue : [],
+    reservations: Array.isArray(printer.reservations) ? printer.reservations : [],
+  };
 }
 
-async function readState(db){
+function queueSlots(printer, now = Date.now()) {
+  let cursor = printer.status === "printing" && printer.endsAt > now ? printer.endsAt : now;
+  const reservations = printer.reservations
+    .filter(item => item.endAt > now)
+    .sort((a, b) => a.startAt - b.startAt);
+
+  return printer.queue.map(job => {
+    const length = minutes(job.duration) * 60000;
+    for (const reservation of reservations) {
+      if (reservation.endAt <= cursor) continue;
+      if (cursor + length <= reservation.startAt) break;
+      cursor = Math.max(cursor, reservation.endAt);
+    }
+    const slot = { ...job, startAt: cursor, endAt: cursor + length };
+    cursor = slot.endAt;
+    return slot;
+  });
+}
+
+function busyConflict(printer, startAt, endAt, options = {}) {
+  const now = Date.now();
+  if (printer.status === "printing" && printer.endsAt > now) {
+    const activeStart = printer.startedAt || Math.min(now, printer.endsAt - minutes(printer.duration || 60) * 60000);
+    if (overlaps(startAt, endAt, activeStart, printer.endsAt)) return "devam eden baskı";
+  }
+
+  const reservation = printer.reservations.find(item =>
+    item.id !== options.ignoreReservationId && overlaps(startAt, endAt, item.startAt, item.endAt)
+  );
+  if (reservation) return `“${reservation.purpose}” rezervasyonu`;
+
+  if (options.includeQueue) {
+    const queued = queueSlots(printer, now).find(item => overlaps(startAt, endAt, item.startAt, item.endAt));
+    if (queued) return `“${queued.name}” sıralı işi`;
+  }
+  return null;
+}
+
+async function ensureTable(db) {
+  await db.prepare("CREATE TABLE IF NOT EXISTS lab_state (id INTEGER PRIMARY KEY, printers TEXT NOT NULL, activity TEXT NOT NULL, updated_at INTEGER NOT NULL)").run();
+  const found = await db.prepare("SELECT id FROM lab_state WHERE id=1").first();
+  if (found) return;
+
+  const now = Date.now();
+  const printers = [
+    { id: "printer-01", name: "Yazıcı 01", color: "#dc2626", status: "printing", job: "İHA sensör braketi v4", owner: "Ece Yılmaz", startedAt: now - 2820000, endsAt: now + 8280000, duration: 185, queue: [{ id: "q1", name: "Hava girişi prototipi", owner: "Kerem", duration: 150 }], reservations: [] },
+    { id: "printer-02", name: "Yazıcı 02", color: "#2563eb", status: "free", queue: [], reservations: [] },
+    { id: "printer-03", name: "Yazıcı 03", color: "#64748b", status: "finished", job: "Kanat nervürü test parçası", owner: "Mert Kaya", endsAt: now - 1440000, queue: [], reservations: [] },
+    { id: "printer-04", name: "Yazıcı 04", color: "#64748b", status: "maintenance", maintenanceNote: "Nozul değişimi", queue: [], reservations: [] },
+    { id: "printer-05", name: "Yazıcı 05", color: "#2563eb", status: "free", queue: [{ id: "q2", name: "Motor bağlantı parçası", owner: "Selin", duration: 95 }], reservations: [] },
+  ];
+  const activity = [
+    { id: "a1", action: "Baskı başlatıldı", detail: "İHA sensör braketi v4 · Yazıcı 01", user: "Ece Yılmaz", at: now - 2820000 },
+    { id: "a2", action: "Baskı tamamlandı", detail: "Kanat nervürü test parçası · Yazıcı 03", user: "Mert Kaya", at: now - 4920000 },
+    { id: "a3", action: "Bakım modu açıldı", detail: "Nozul değişimi · Yazıcı 04", user: "Laboratuvar Sorumlusu", at: now - 11520000 },
+  ];
+  await db.prepare("INSERT INTO lab_state (id,printers,activity,updated_at) VALUES (1,?,?,?)")
+    .bind(JSON.stringify(printers), JSON.stringify(activity), now).run();
+}
+
+async function readState(db) {
   await ensureTable(db);
-  const row=await db.prepare("SELECT printers,activity FROM lab_state WHERE id=1").first();
-  const state={printers:JSON.parse(row.printers),activity:JSON.parse(row.activity)};
-  let changed=false;
-  state.printers=state.printers.map(p=>{if(p.status==="printing"&&p.endsAt&&p.endsAt<=Date.now()){changed=true;return{...p,status:"finished"}}return p});
-  if(changed)await writeState(db,state);
+  const row = await db.prepare("SELECT printers,activity FROM lab_state WHERE id=1").first();
+  const state = {
+    printers: JSON.parse(row.printers).map(normalizePrinter),
+    activity: JSON.parse(row.activity),
+  };
+  let changed = false;
+  state.printers = state.printers.map(printer => {
+    if (printer.status === "printing" && printer.endsAt && printer.endsAt <= Date.now()) {
+      changed = true;
+      return { ...printer, status: "finished" };
+    }
+    return printer;
+  });
+  if (changed) await writeState(db, state);
   return state;
 }
 
-async function writeState(db,state){
-  await db.prepare("UPDATE lab_state SET printers=?,activity=?,updated_at=? WHERE id=1").bind(JSON.stringify(state.printers),JSON.stringify(state.activity.slice(0,500)),Date.now()).run();
+async function writeState(db, state) {
+  await db.prepare("UPDATE lab_state SET printers=?,activity=?,updated_at=? WHERE id=1")
+    .bind(JSON.stringify(state.printers), JSON.stringify(state.activity.slice(0, 500)), Date.now()).run();
 }
 
-export async function onRequestGet({env}){
-  if(!env.DB)return json({error:"D1 veritabanı bağlantısı eksik. Cloudflare Pages ayarlarından DB bağlantısını ekleyip yeniden yayınlayın."},500);
-  try{return json(await readState(env.DB))}catch(error){return json({error:error.message||"Veritabanı hatası"},500)}
+function findPrinter(state, id) {
+  return state.printers.find(printer => printer.id === id);
 }
 
-export async function onRequestPost({request,env}){
-  if(!env.DB)return json({error:"D1 veritabanı bağlantısı eksik. Cloudflare Pages ayarlarından DB bağlantısını ekleyip yeniden yayınlayın."},500);
-  try{
-    const state=await readState(env.DB),body=await request.json();
-    if(!body.entry?.user?.trim())return json({error:"Adınızı girmeniz gerekiyor"},400);
-    if(body.action==="updatePrinter"&&body.printer)state.printers=state.printers.map(p=>p.id===body.printer.id?body.printer:p);
-    else if(body.action==="addPrinter"&&body.printer&&!state.printers.some(p=>p.id===body.printer.id))state.printers.push(body.printer);
-    else if(body.action==="deletePrinter"&&body.printerId)state.printers=state.printers.filter(p=>p.id!==body.printerId);
-    else if(body.action!=="activity")return json({error:"Geçersiz işlem"},400);
+function replacePrinter(state, next) {
+  state.printers = state.printers.map(printer => printer.id === next.id ? next : printer);
+}
+
+function requireText(value, label) {
+  const text = String(value || "").trim();
+  if (!text) throw new Error(`${label} boş bırakılamaz`);
+  return text;
+}
+
+function applyAction(state, body) {
+  const action = body.action;
+  const printer = body.printerId ? findPrinter(state, body.printerId) : null;
+
+  if (action === "addPrinter") {
+    const next = normalizePrinter(body.printer || {});
+    next.name = requireText(next.name, "Yazıcı adı");
+    if (!next.id || state.printers.some(item => item.id === next.id)) throw new Error("Bu yazıcı zaten mevcut");
+    state.printers.push(next);
+    return;
+  }
+
+  if (action === "deletePrinter") {
+    if (!printer) throw new Error("Yazıcı bulunamadı");
+    state.printers = state.printers.filter(item => item.id !== printer.id);
+    return;
+  }
+
+  if (action === "reorderPrinters") {
+    const positions = new Map((body.order || []).map((id, index) => [id, index]));
+    state.printers.sort((a, b) => (positions.get(a.id) ?? 9999) - (positions.get(b.id) ?? 9999));
+    return;
+  }
+
+  if (!printer) throw new Error("Yazıcı bulunamadı");
+
+  if (action === "startJob") {
+    if (printer.status === "maintenance") throw new Error("Bakımdaki yazıcıya iş eklenemez");
+    const job = {
+      id: crypto.randomUUID(),
+      name: requireText(body.job?.name, "İş adı"),
+      owner: requireText(body.job?.owner, "Ad"),
+      duration: minutes(body.job?.duration),
+    };
+    if (printer.status === "free" && printer.queue.length === 0) {
+      const startedAt = Date.now();
+      const endsAt = startedAt + job.duration * 60000;
+      const conflict = busyConflict(printer, startedAt, endsAt);
+      if (conflict) throw new Error(`Bu süre ${conflict} ile çakışıyor. Süreyi kısaltın veya rezervasyon sonrasına sıraya ekleyin.`);
+      replacePrinter(state, { ...printer, status: "printing", job: job.name, owner: job.owner, duration: job.duration, startedAt, endsAt });
+      body.resultMode = "started";
+      body.entry.action = "Baskı başlatıldı";
+    } else {
+      replacePrinter(state, { ...printer, queue: [...printer.queue, job] });
+      body.resultMode = "queued";
+      body.entry.action = "Sıraya eklendi";
+    }
+    return;
+  }
+
+  if (action === "startQueuedJob") {
+    if (printer.status !== "free") throw new Error("Yazıcı şu anda uygun değil");
+    const [job, ...rest] = printer.queue;
+    if (!job) throw new Error("Sırada başlatılacak iş yok");
+    const startedAt = Date.now();
+    const endsAt = startedAt + minutes(job.duration) * 60000;
+    const conflict = busyConflict(printer, startedAt, endsAt);
+    if (conflict) throw new Error(`Bu iş şu anda başlatılırsa ${conflict} ile çakışır`);
+    replacePrinter(state, { ...printer, queue: rest, status: "printing", job: job.name, owner: job.owner, duration: minutes(job.duration), startedAt, endsAt });
+    return;
+  }
+
+  if (action === "clearFinished") {
+    if (printer.status !== "finished") throw new Error("Bu baskı henüz tamamlanmadı");
+    const next = { ...printer, status: "free" };
+    delete next.job;
+    delete next.owner;
+    delete next.duration;
+    delete next.startedAt;
+    delete next.endsAt;
+    replacePrinter(state, next);
+    return;
+  }
+
+  if (action === "editPrinter") {
+    const next = { ...printer, name: requireText(body.name, "Yazıcı adı"), color: body.color || printer.color };
+    if (printer.job && body.jobName !== undefined) next.job = requireText(body.jobName, "İş adı");
+    replacePrinter(state, next);
+    return;
+  }
+
+  if (action === "editQueueJob") {
+    const nextQueue = printer.queue.map(job => job.id === body.jobId ? {
+      ...job,
+      name: requireText(body.name, "İş adı"),
+      duration: minutes(body.duration),
+    } : job);
+    if (!nextQueue.some(job => job.id === body.jobId)) throw new Error("Sıra işi bulunamadı");
+    replacePrinter(state, { ...printer, queue: nextQueue });
+    return;
+  }
+
+  if (action === "deleteQueueJob") {
+    replacePrinter(state, { ...printer, queue: printer.queue.filter(job => job.id !== body.jobId) });
+    return;
+  }
+
+  if (action === "setMaintenance") {
+    const active = Boolean(body.active);
+    if (active && printer.status === "printing") throw new Error("Devam eden baskı varken bakım modu açılamaz");
+    const next = { ...printer, status: active ? "maintenance" : "free" };
+    if (active) next.maintenanceNote = requireText(body.note, "Bakım nedeni");
+    else delete next.maintenanceNote;
+    replacePrinter(state, next);
+    return;
+  }
+
+  if (action === "addReservation") {
+    if (printer.status === "maintenance") throw new Error("Bakımdaki yazıcı rezerve edilemez");
+    const reservation = {
+      id: crypto.randomUUID(),
+      purpose: requireText(body.reservation?.purpose, "Amaç"),
+      owner: requireText(body.reservation?.owner, "Ad"),
+      startAt: Number(body.reservation?.startAt),
+      endAt: Number(body.reservation?.endAt),
+    };
+    if (!Number.isFinite(reservation.startAt) || !Number.isFinite(reservation.endAt) || reservation.endAt <= reservation.startAt) throw new Error("Rezervasyon zamanı geçersiz");
+    if (reservation.startAt < Date.now() - 60000) throw new Error("Geçmiş bir saate rezervasyon yapılamaz");
+    const conflict = busyConflict(printer, reservation.startAt, reservation.endAt, { includeQueue: true });
+    if (conflict) throw new Error(`Seçilen zaman ${conflict} ile çakışıyor`);
+    replacePrinter(state, { ...printer, reservations: [...printer.reservations, reservation].sort((a, b) => a.startAt - b.startAt) });
+    body.createdReservation = reservation;
+    return;
+  }
+
+  if (action === "deleteReservation") {
+    replacePrinter(state, { ...printer, reservations: printer.reservations.filter(item => item.id !== body.reservationId) });
+    return;
+  }
+
+  throw new Error("Geçersiz işlem");
+}
+
+export async function onRequestGet({ env }) {
+  if (!env.DB) return json({ error: "D1 veritabanı bağlantısı eksik. DB bağlantısını ekleyip yeniden yayınlayın." }, 500);
+  try {
+    return json(await readState(env.DB));
+  } catch (error) {
+    return json({ error: error.message || "Veritabanı hatası" }, 500);
+  }
+}
+
+export async function onRequestPost({ request, env }) {
+  if (!env.DB) return json({ error: "D1 veritabanı bağlantısı eksik. DB bağlantısını ekleyip yeniden yayınlayın." }, 500);
+  try {
+    const state = await readState(env.DB);
+    const body = await request.json();
+    if (!body.entry?.user?.trim()) return json({ error: "Adınızı girmeniz gerekiyor" }, 400);
+    applyAction(state, body);
     state.activity.unshift(body.entry);
-    await writeState(env.DB,state);
-    return json({ok:true});
-  }catch(error){return json({error:error.message||"Veritabanı hatası"},500)}
+    await writeState(env.DB, state);
+    return json({ ok: true, mode: body.resultMode, state });
+  } catch (error) {
+    const status = /çakış|uygun değil|geçmiş|devam eden/.test(error.message || "") ? 409 : 400;
+    return json({ error: error.message || "Veritabanı hatası" }, status);
+  }
 }
