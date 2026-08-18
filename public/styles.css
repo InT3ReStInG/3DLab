@@ -167,6 +167,42 @@ button { color: inherit; }
 .calendar-event button { width: 24px; height: 24px; flex: 0 0 auto; border: 0; border-radius: 50%; background: #fff8; color: var(--red); cursor: pointer; }
 .available-slot { padding: 12px; border: 1px dashed #cbd5df; border-radius: 7px; color: var(--green); font-size: 9px; }
 
+.timeline-scroll { position: relative; max-height: 72vh; overflow: auto; background: #fff; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.timeline-board { min-width: var(--timeline-min-width); display: grid; grid-template-columns: 84px minmax(0, 1fr); grid-template-rows: 48px var(--timeline-height); }
+.timeline-corner { position: sticky; z-index: 8; top: 0; left: 0; padding: 0 9px; display: flex; align-items: center; border-right: 1px solid #cfd6df; border-bottom: 1px solid #cfd6df; background: #eef2f6; color: #596678; font-size: 8px; font-weight: 750; letter-spacing: .04em; }
+.timeline-printer-heads { position: sticky; z-index: 7; top: 0; display: grid; grid-template-columns: repeat(var(--printer-count), minmax(190px, 1fr)); border-bottom: 1px solid #cfd6df; background: #f8fafc; }
+.timeline-printer-heads > div { min-width: 0; padding: 7px 10px; display: flex; align-items: center; gap: 8px; border-left: 1px solid var(--line); }
+.timeline-printer-heads i { width: 7px; height: 27px; flex: 0 0 auto; border-radius: 4px; }
+.timeline-printer-heads span, .timeline-printer-heads b, .timeline-printer-heads small { min-width: 0; display: block; }
+.timeline-printer-heads b { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-printer-heads small { margin-top: 2px; overflow: hidden; color: #7b8797; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-axis { position: sticky; z-index: 5; left: 0; height: var(--timeline-height); border-right: 1px solid #cfd6df; background: #f8fafc; }
+.timeline-hour { position: relative; padding: 5px 7px; border-bottom: 1px solid #e7ebf0; color: #7b8695; font-size: 8px; text-align: right; }
+.timeline-hour span { display: block; }
+.timeline-hour.day-start { border-top: 2px solid #9ba7b7; background: #edf2f7; color: var(--navy); text-align: left; }
+.timeline-hour.day-start b { display: block; margin-bottom: 2px; font-size: 8px; text-transform: capitalize; }
+.timeline-lanes { position: relative; height: var(--timeline-height); display: grid; grid-template-columns: repeat(var(--printer-count), minmax(190px, 1fr)); }
+.timeline-lane { position: relative; min-width: 0; height: var(--timeline-height); border-left: 1px solid var(--line); background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--hour-height) - 1px), #e7ebf0 calc(var(--hour-height) - 1px), #e7ebf0 var(--hour-height)); }
+.timeline-day-divider { position: absolute; z-index: 1; right: 0; left: 0; height: 2px; background: #9ba7b7; pointer-events: none; }
+.timeline-now-line { position: absolute; z-index: 6; right: 0; left: 0; height: 2px; background: var(--red); pointer-events: none; box-shadow: 0 0 0 1px #fff8; }
+.timeline-now-line::before { content: ""; position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--red); }
+.timeline-now-line span { position: sticky; left: 91px; top: -9px; width: max-content; padding: 2px 5px; display: block; border-radius: 4px; background: var(--red); color: #fff; font-size: 7px; font-style: normal; }
+.timeline-now-axis { position: absolute; z-index: 7; right: 4px; transform: translateY(-50%); padding: 2px 4px; border-radius: 4px; background: var(--red); color: #fff; font-size: 7px; font-style: normal; }
+.timeline-event { position: absolute; z-index: 3; right: 5px; left: 5px; min-height: 20px; padding: 6px 7px; overflow: hidden; display: flex; justify-content: space-between; gap: 5px; border-left: 3px solid var(--blue); border-radius: 6px; background: #dfeaff; color: #20304a; box-shadow: 0 1px 3px #17203318; }
+.timeline-event.reservation { border-color: var(--red); background: #ffe5e8; }
+.timeline-event.queue { border-color: #7b8798; background: #e9edf2; }
+.timeline-event.maintenance { border-color: var(--amber); background: repeating-linear-gradient(135deg, #fff4d6, #fff4d6 9px, #ffedbd 9px, #ffedbd 18px); }
+.timeline-event > div { min-width: 0; }
+.timeline-event small, .timeline-event b, .timeline-event span { display: block; }
+.timeline-event small { overflow: hidden; color: #647084; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-event b { margin-top: 3px; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-event span { margin-top: 2px; overflow: hidden; color: #5f6c7d; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-event.compact { padding-top: 3px; padding-bottom: 3px; align-items: center; }
+.timeline-event.compact small { display: block; font-size: 6px; }
+.timeline-event.compact b { margin-top: 1px; font-size: 7px; }
+.timeline-event.compact span { display: none; }
+.timeline-event button { width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: 50%; background: #fff9; color: var(--red); cursor: pointer; }
+
 .modal-backdrop { position: fixed; z-index: 20; inset: 0; padding: 18px; display: grid; place-items: center; background: #11182766; backdrop-filter: blur(3px); }
 .modal-card { position: relative; width: min(440px, 100%); max-height: 92vh; overflow: auto; padding: 30px; border-radius: 14px; background: #fff; box-shadow: 0 20px 60px #11182733; }
 .modal-close { position: absolute; right: 14px; top: 10px; border: 0; background: transparent; color: #7b8492; font-size: 27px; cursor: pointer; }
@@ -214,6 +250,11 @@ footer { padding: 24px 2px 30px; display: flex; justify-content: space-between; 
   .printer-filter { width: 100%; }
   .printer-filter summary { width: 100%; }
   .printer-filter-menu { right: auto; left: 0; width: 100%; }
+  .timeline-scroll { max-height: 68vh; }
+  .timeline-board { grid-template-columns: 76px minmax(0, 1fr); }
+  .timeline-printer-heads, .timeline-lanes { grid-template-columns: repeat(var(--printer-count), minmax(164px, 1fr)); }
+  .timeline-corner { padding: 0 7px; }
+  .timeline-hour { padding-right: 6px; }
   .calendar-printer { grid-template-columns: 1fr; gap: 8px; }
   .modal-card { padding: 25px 20px; }
   .form-grid { grid-template-columns: 1fr; }

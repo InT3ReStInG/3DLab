@@ -15,6 +15,8 @@ let calendarDate = startOfDay(new Date());
 let calendarSelectedPrinters = new Set();
 let calendarKnownPrinters = new Set();
 let calendarFilterInitialized = false;
+let calendarScroll = { top: 0, left: 0 };
+let calendarShouldFocusNow = true;
 
 const statusText = {
   free: "UYGUN",
@@ -367,38 +369,84 @@ function renderCalendarFilters() {
 
 function renderCalendar() {
   renderCalendarFilters();
+  const previousTimeline = $("#calendarTimeline");
+  if (previousTimeline) calendarScroll = { top: previousTimeline.scrollTop, left: previousTimeline.scrollLeft };
   const first = calendarMode === "week" ? mondayOf(calendarDate) : startOfDay(calendarDate);
-  const days = Array.from({ length: calendarMode === "week" ? 7 : 1 }, (_, index) => addDays(first, index));
+  const dayCount = calendarMode === "week" ? 7 : 1;
+  const end = addDays(first, dayCount);
+  const totalHours = dayCount * 24;
+  const hourHeight = calendarMode === "week" ? 30 : 56;
+  const selected = printers.filter(printer => calendarSelectedPrinters.has(printer.id));
   $("#calendarDate").value = dateValue(calendarDate);
   $("#calendarDay").classList.toggle("active", calendarMode === "day");
   $("#calendarWeek").classList.toggle("active", calendarMode === "week");
   $("#calendarTitle").textContent = calendarMode === "day"
     ? calendarDate.toLocaleDateString("tr-TR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
     : `${first.toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} – ${addDays(first, 6).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })}`;
+  const minWidth = 84 + selected.length * 190;
+  const rangeStart = first.getTime();
+  const rangeEnd = end.getTime();
+  const now = Date.now();
+  const nowTop = (now - rangeStart) / 3600000 * hourHeight;
+  const nowVisible = now >= rangeStart && now < rangeEnd;
+  const dayLines = Array.from({ length: dayCount - 1 }, (_, index) => `<i class="timeline-day-divider" style="top:${(index + 1) * 24 * hourHeight}px"></i>`).join("");
+  const nowLine = nowVisible ? `<i class="timeline-now-line" style="top:${nowTop}px"><span>Şimdi</span></i>` : "";
+  const nowAxis = nowVisible ? `<i class="timeline-now-axis" style="top:${nowTop}px">${timeValue(now)}</i>` : "";
 
-  $("#calendarGrid").innerHTML = `<div class="calendar-days ${calendarMode}">${days.map(day => calendarDay(day)).join("")}</div>`;
+  $("#calendarGrid").innerHTML = selected.length ? `<div class="timeline-scroll ${calendarMode}" id="calendarTimeline"><div class="timeline-board" style="--printer-count:${selected.length};--hour-height:${hourHeight}px;--timeline-height:${totalHours * hourHeight}px;--timeline-min-width:${minWidth}px"><div class="timeline-corner">Tarih / Saat</div><div class="timeline-printer-heads">${selected.map(timelinePrinterHeader).join("")}</div><div class="timeline-axis">${timelineAxis(first, totalHours, hourHeight).join("")}${nowAxis}</div><div class="timeline-lanes">${selected.map(printer => timelineLane(printer, rangeStart, rangeEnd, hourHeight)).join("")}${dayLines}${nowLine}</div></div></div>` : empty("En az bir yazıcı seçin");
+
+  document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = () => cancelReservation(button.dataset.cancelReservation, button.dataset.reservation));
+  requestAnimationFrame(() => {
+    const timeline = $("#calendarTimeline");
+    if (!timeline) return;
+    if (calendarShouldFocusNow) {
+      const selectedOffset = (startOfDay(calendarDate).getTime() - rangeStart) / 3600000 * hourHeight;
+      const focusTop = nowVisible ? nowTop : selectedOffset + 8 * hourHeight;
+      timeline.scrollTop = Math.max(0, focusTop - timeline.clientHeight * .32);
+      timeline.scrollLeft = calendarScroll.left;
+    } else {
+      timeline.scrollTop = calendarScroll.top;
+      timeline.scrollLeft = calendarScroll.left;
+    }
+    calendarShouldFocusNow = false;
+    timeline.onscroll = () => { calendarScroll = { top: timeline.scrollTop, left: timeline.scrollLeft }; };
+  });
 }
 
-function calendarDay(day) {
-  const dayStart = startOfDay(day).getTime();
-  const dayEnd = addDays(dayStart, 1).getTime();
-  const rows = printers.filter(printer => calendarSelectedPrinters.has(printer.id)).map(printer => {
-    const events = scheduleEvents(printer).filter(item => item.startAt < dayEnd && item.endAt > dayStart);
-    if (calendarMode === "week" && !events.length && printer.status !== "maintenance") return "";
-    const content = printer.status === "maintenance"
-      ? `<div class="calendar-event maintenance"><div><span>Tüm gün · Bakım</span><b>Servis dışı</b><small>${esc(printer.maintenanceNote || "Bakım modu")}</small></div></div>`
-      : events.length
-        ? events.map(item => calendarEvent(item, printer)).join("")
-        : `<span class="available-slot">Bu gün planlanmış iş yok</span>`;
-    return `<div class="calendar-printer"><div class="calendar-printer-name"><i style="background:${esc(printer.color)}"></i><div><b>${esc(printer.name)}</b><small>${esc(availabilitySummary(printer))}</small></div></div><div class="calendar-events">${content}</div></div>`;
-  }).join("");
-  return `<section class="calendar-day"><header><b>${day.toLocaleDateString("tr-TR", { weekday: "short", day: "numeric", month: "short" })}</b></header>${rows || empty("Planlanmış iş yok")}</section>`;
+function timelinePrinterHeader(printer) {
+  return `<div><i style="background:${esc(printer.color)}"></i><span><b>${esc(printer.name)}</b><small>${esc(availabilitySummary(printer))}</small></span></div>`;
 }
 
-function calendarEvent(item, printer) {
+function timelineAxis(first, totalHours, hourHeight) {
+  return Array.from({ length: totalHours }, (_, index) => {
+    const time = new Date(first.getTime() + index * 3600000);
+    const dayStart = time.getHours() === 0;
+    const day = dayStart ? `<b>${time.toLocaleDateString("tr-TR", { weekday: "short", day: "numeric", month: "short" })}</b>` : "";
+    return `<div class="timeline-hour ${dayStart ? "day-start" : ""}" style="height:${hourHeight}px">${day}<span>${String(time.getHours()).padStart(2, "0")}:00</span></div>`;
+  });
+}
+
+function timelineLane(printer, rangeStart, rangeEnd, hourHeight) {
+  if (printer.status === "maintenance") {
+    const height = (rangeEnd - rangeStart) / 3600000 * hourHeight;
+    return `<div class="timeline-lane"><div class="timeline-event maintenance" style="top:3px;height:${Math.max(24, height - 6)}px"><b>Servis dışı</b><span>${esc(printer.maintenanceNote || "Bakım modu")}</span></div></div>`;
+  }
+  const events = scheduleEvents(printer)
+    .filter(item => item.startAt < rangeEnd && item.endAt > rangeStart)
+    .map(item => timelineEvent(item, printer, rangeStart, rangeEnd, hourHeight))
+    .join("");
+  return `<div class="timeline-lane">${events}</div>`;
+}
+
+function timelineEvent(item, printer, rangeStart, rangeEnd, hourHeight) {
+  const clippedStart = Math.max(item.startAt, rangeStart);
+  const clippedEnd = Math.min(item.endAt, rangeEnd);
+  const top = (clippedStart - rangeStart) / 3600000 * hourHeight;
+  const height = Math.max(22, (clippedEnd - clippedStart) / 3600000 * hourHeight);
   const typeText = { print: "Baskı", reservation: "Rezervasyon", queue: "Sıra" }[item.type];
+  const fullRange = `${new Date(item.startAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} → ${new Date(item.endAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`;
   const cancel = item.type === "reservation" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Rezervasyonu iptal et">×</button>` : "";
-  return `<div class="calendar-event ${item.type}"><div><span>${timeValue(item.startAt)}–${timeValue(item.endAt)} · ${typeText}</span><b>${esc(item.label)}</b><small>${esc(item.owner)}</small></div>${cancel}</div>`;
+  return `<div class="timeline-event ${item.type} ${height < 54 ? "compact" : ""}" style="top:${top + 2}px;height:${Math.max(20, height - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}"><div><small>${typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${cancel}</div>`;
 }
 
 function bindDynamicControls() {
@@ -640,7 +688,7 @@ function reorderBefore(sourceId, targetId) {
   const sourceIndex = printers.findIndex(item => item.id === sourceId);
   const targetIndex = printers.findIndex(item => item.id === targetId);
   const [source] = printers.splice(sourceIndex, 1);
-  printers.splice(targetIndex, 0, source);
+  printers.splice(sourceIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, source);
   render();
 }
 
@@ -653,22 +701,26 @@ function movePrinter(id, direction) {
 }
 
 function setTab(next) {
+  const changed = tab !== next;
   tab = next;
   document.querySelectorAll(".tabs button").forEach(button => button.classList.toggle("active", button.dataset.tab === next));
   ["fleet", "calendar", "queue", "history"].forEach(name => $("#" + name + "View").classList.toggle("hidden", name !== next));
-  if (next === "calendar") renderCalendar();
+  if (next === "calendar") {
+    if (changed) calendarShouldFocusNow = true;
+    renderCalendar();
+  }
 }
 
 document.querySelectorAll(".tabs button").forEach(button => button.onclick = () => setTab(button.dataset.tab));
 document.querySelector("[data-open-tab]").onclick = () => setTab("history");
 $("#reorderButton").onclick = beginOrSaveReorder;
 $("#cancelReorder").onclick = cancelReorder;
-$("#calendarDay").onclick = () => { calendarMode = "day"; renderCalendar(); };
-$("#calendarWeek").onclick = () => { calendarMode = "week"; renderCalendar(); };
-$("#calendarPrev").onclick = () => { calendarDate = addDays(calendarDate, calendarMode === "week" ? -7 : -1); renderCalendar(); };
-$("#calendarNext").onclick = () => { calendarDate = addDays(calendarDate, calendarMode === "week" ? 7 : 1); renderCalendar(); };
-$("#calendarToday").onclick = () => { calendarDate = startOfDay(new Date()); renderCalendar(); };
-$("#calendarDate").onchange = event => { if (event.target.value) calendarDate = startOfDay(`${event.target.value}T00:00:00`); renderCalendar(); };
+$("#calendarDay").onclick = () => { calendarMode = "day"; calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarWeek").onclick = () => { calendarMode = "week"; calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarPrev").onclick = () => { calendarDate = addDays(calendarDate, calendarMode === "week" ? -7 : -1); calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarNext").onclick = () => { calendarDate = addDays(calendarDate, calendarMode === "week" ? 7 : 1); calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarToday").onclick = () => { calendarDate = startOfDay(new Date()); calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarDate").onchange = event => { if (event.target.value) calendarDate = startOfDay(`${event.target.value}T00:00:00`); calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarShowAll").onclick = event => {
   event.preventDefault();
   calendarSelectedPrinters = new Set(printers.map(printer => printer.id));
