@@ -42,7 +42,7 @@ button { color: inherit; }
 .subtle-button:hover { border-color: #b8c1ce; background: #fafbfc; }
 
 .printer-rail { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(224px, 1fr); gap: 12px; overflow-x: auto; padding: 1px 1px 12px; scroll-snap-type: x mandatory; }
-.printer-card, .add-card { position: relative; min-height: 340px; overflow: hidden; scroll-snap-align: start; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 1px 2px #1018280a; }
+.printer-card, .add-card { position: relative; min-height: 370px; overflow: hidden; scroll-snap-align: start; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 1px 2px #1018280a; }
 .printer-card::before { content: ""; position: absolute; inset: 0 0 auto; height: 3px; background: var(--accent); }
 .card-top { display: flex; align-items: center; justify-content: space-between; padding: 15px 15px 0; }
 .status { color: var(--muted); font-size: 9px; font-weight: 700; }
@@ -50,7 +50,7 @@ button { color: inherit; }
 .trash { opacity: 0; padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; color: #929baa; font-size: 17px; cursor: pointer; }
 .printer-card:hover .trash, .printer-card:focus-within .trash { opacity: 1; }
 .trash:hover { background: var(--red); color: #fff; }
-.printer-main { width: 100%; height: 280px; padding: 8px 18px 14px; display: flex; flex-direction: column; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.printer-main { width: 100%; height: 310px; padding: 8px 18px 14px; display: flex; flex-direction: column; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .printer-main:disabled { cursor: grab; }
 .printer-icon { height: 112px; display: grid; place-items: center; }
 .printer-icon span { position: relative; width: 72px; height: 72px; display: grid; place-items: center; border-radius: 12px; background: #f4f6f9; color: var(--accent); font-size: 35px; }
@@ -60,6 +60,7 @@ button { color: inherit; }
 .printer-card .job { color: var(--text); font-size: 12px; }
 .owner { margin-top: 7px; color: var(--muted); font-size: 10px; }
 .queue-note { margin-top: 8px; color: var(--blue); font-size: 9px; font-weight: 650; }
+.availability-line { margin-top: 8px; display: block; color: #4f5b6d; font-size: 9px; line-height: 1.35; font-weight: 650; }
 .primary-action, .maintenance-action { height: 36px; margin-top: 20px; display: flex; align-items: center; justify-content: center; border: 1px solid #cbd8f6; border-radius: 8px; background: #f4f7fe; color: var(--blue); font-size: 10px; font-weight: 700; }
 .maintenance-action { border-color: #f0d5d8; background: #fff6f7; color: #a5333e; }
 .progress { height: 5px; margin-top: 15px; overflow: hidden; border-radius: 4px; background: #edf0f4; }
@@ -131,11 +132,13 @@ button { color: inherit; }
 .calendar-printer-name { display: flex; align-items: flex-start; gap: 8px; }
 .calendar-printer-name i { width: 7px; height: 24px; flex: 0 0 auto; border-radius: 4px; }
 .calendar-printer-name b { font-size: 10px; }
+.calendar-printer-name small { margin-top: 4px; display: block; color: #7b8797; font-size: 8px; line-height: 1.35; }
 .week .calendar-printer-name { margin-bottom: 7px; }
 .calendar-events { display: grid; gap: 6px; }
 .calendar-event { min-height: 48px; padding: 8px 9px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-left: 3px solid var(--blue); border-radius: 6px; background: #edf4ff; }
 .calendar-event.reservation { border-color: var(--red); background: #fff1f2; }
 .calendar-event.queue { border-color: #7b8798; background: #f2f4f7; }
+.calendar-event.maintenance { border-color: var(--amber); background: #fff8e8; }
 .calendar-event span, .calendar-event b, .calendar-event small { display: block; }
 .calendar-event span { color: #647084; font-size: 8px; }
 .calendar-event b { margin-top: 2px; font-size: 10px; }

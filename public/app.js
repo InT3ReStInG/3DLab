@@ -154,6 +154,50 @@ function queueRows() {
   return printers.flatMap(printer => queueSlots(printer));
 }
 
+function mergedBusyIntervals(printer) {
+  const intervals = scheduleEvents(printer)
+    .filter(item => item.endAt > Date.now())
+    .map(item => ({ startAt: Math.max(item.startAt, Date.now()), endAt: item.endAt }))
+    .sort((a, b) => a.startAt - b.startAt);
+  const merged = [];
+  for (const interval of intervals) {
+    const previous = merged[merged.length - 1];
+    if (previous && interval.startAt <= previous.endAt) previous.endAt = Math.max(previous.endAt, interval.endAt);
+    else merged.push({ ...interval });
+  }
+  return merged;
+}
+
+function friendlyAvailabilityTime(value) {
+  const date = new Date(value);
+  const today = startOfDay(new Date()).getTime();
+  const targetDay = startOfDay(date).getTime();
+  const prefix = targetDay === today ? "Bugün" : targetDay === addDays(today, 1).getTime() ? "Yarın" : date.toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
+  return `${prefix} ${timeValue(date)}`;
+}
+
+function availabilitySummary(printer) {
+  if (printer.status === "maintenance") return "Bakımda · uygunluk zamanı bilinmiyor";
+  const now = Date.now();
+  const twoDays = 48 * 60 * 60000;
+  const intervals = mergedBusyIntervals(printer);
+  let availableAt = now;
+  let index = 0;
+
+  while (index < intervals.length && intervals[index].startAt <= availableAt) {
+    availableAt = Math.max(availableAt, intervals[index].endAt);
+    index += 1;
+  }
+  while (index < intervals.length && intervals[index].endAt <= availableAt) index += 1;
+  const nextBusyAt = intervals[index]?.startAt;
+  const availableFor = nextBusyAt ? nextBusyAt - availableAt : Infinity;
+
+  if (availableAt <= now + 60000 && availableFor >= twoDays) return "Önümüzdeki 2 gün planlanmış baskı yok";
+  const startText = availableAt <= now + 60000 ? "Şimdi uygun" : `Sonraki uygun: ${friendlyAvailabilityTime(availableAt)}`;
+  if (availableFor >= twoDays) return `${startText} · en az 2 gün uygun`;
+  return `${startText} · ${durationText(Math.max(1, Math.floor(availableFor / 60000)))} uygun`;
+}
+
 function render() {
   printers = printers.map(printer => printer.status === "printing" && printer.endsAt <= Date.now()
     ? { ...printer, status: "finished" }
@@ -188,15 +232,16 @@ function render() {
 function card(printer, index) {
   const icon = printer.status === "maintenance" ? "⚙" : "▣";
   const queueNote = printer.queue.length ? `<span class="queue-note">${printer.queue.length} iş sırada</span>` : "";
+  const availability = `<span class="availability-line">${esc(availabilitySummary(printer))}</span>`;
   let body;
   if (printer.status === "free") {
     body = printer.queue.length
-      ? `<p>${esc(printer.queue[0].name)}</p><span class="primary-action">▶ SIRADAKİ İŞİ BAŞLAT</span>${queueNote}`
-      : `<p>Yeni bir iş için hazır</p><span class="primary-action">＋ BASKI EKLE</span>`;
+      ? `<p>${esc(printer.queue[0].name)}</p><span class="primary-action">▶ SIRADAKİ İŞİ BAŞLAT</span>${queueNote}${availability}`
+      : `<p>Yeni bir iş için hazır</p><span class="primary-action">＋ BASKI EKLE</span>${availability}`;
   } else if (printer.status === "maintenance") {
-    body = `<p>${esc(printer.maintenanceNote)}</p><span class="maintenance-action">SERVİS DIŞI</span>`;
+    body = `<p>${esc(printer.maintenanceNote)}</p><span class="maintenance-action">SERVİS DIŞI</span>${availability}`;
   } else {
-    body = `<p class="job">${esc(printer.job)}</p><span class="owner">◯ ${esc(printer.owner)}</span><div class="progress"><i style="width:${printer.status === "finished" ? 100 : 58}%"></i></div><div class="time-row"><span>${printer.status === "finished" ? "Temizlenmeyi bekliyor" : "Tahmini kalan süre"}</span><b>${remaining(printer.endsAt)}</b></div>${queueNote}`;
+    body = `<p class="job">${esc(printer.job)}</p><span class="owner">◯ ${esc(printer.owner)}</span><div class="progress"><i style="width:${printer.status === "finished" ? 100 : 58}%"></i></div><div class="time-row"><span>${printer.status === "finished" ? "Temizlenmeyi bekliyor" : "Tahmini kalan süre"}</span><b>${remaining(printer.endsAt)}</b></div>${queueNote}${availability}`;
   }
 
   const reorderControls = reorderMode ? `
@@ -227,8 +272,11 @@ function empty(text) {
 
 function scheduleEvents(printer) {
   const events = [];
-  if (["printing", "finished"].includes(printer.status) && printer.startedAt && printer.endsAt) {
-    events.push({ type: "print", label: printer.job, owner: printer.owner, startAt: printer.startedAt, endAt: printer.endsAt });
+  if (["printing", "finished"].includes(printer.status) && printer.endsAt) {
+    const fallbackStart = printer.status === "printing"
+      ? Math.min(Date.now(), printer.endsAt - Math.max(1, Number(printer.duration) || 1) * 60000)
+      : printer.endsAt - Math.max(1, Number(printer.duration) || 1) * 60000;
+    events.push({ type: "print", label: printer.job, owner: printer.owner, startAt: printer.startedAt || fallbackStart, endAt: printer.endsAt });
   }
   printer.reservations.forEach(item => events.push({ ...item, type: "reservation", label: item.purpose, reservationId: item.id }));
   queueSlots(printer).forEach(item => events.push({ ...item, type: "queue", label: item.name }));
@@ -259,8 +307,13 @@ function calendarDay(day) {
   const dayEnd = addDays(dayStart, 1).getTime();
   const rows = printers.map(printer => {
     const events = scheduleEvents(printer).filter(item => item.startAt < dayEnd && item.endAt > dayStart);
-    if (calendarMode === "week" && !events.length) return "";
-    return `<div class="calendar-printer"><div class="calendar-printer-name"><i style="background:${esc(printer.color)}"></i><b>${esc(printer.name)}</b></div><div class="calendar-events">${events.length ? events.map(item => calendarEvent(item, printer)).join("") : `<span class="available-slot">Bu gün uygun</span>`}</div></div>`;
+    if (calendarMode === "week" && !events.length && printer.status !== "maintenance") return "";
+    const content = printer.status === "maintenance"
+      ? `<div class="calendar-event maintenance"><div><span>Tüm gün · Bakım</span><b>Servis dışı</b><small>${esc(printer.maintenanceNote || "Bakım modu")}</small></div></div>`
+      : events.length
+        ? events.map(item => calendarEvent(item, printer)).join("")
+        : `<span class="available-slot">Bu gün planlanmış iş yok</span>`;
+    return `<div class="calendar-printer"><div class="calendar-printer-name"><i style="background:${esc(printer.color)}"></i><div><b>${esc(printer.name)}</b><small>${esc(availabilitySummary(printer))}</small></div></div><div class="calendar-events">${content}</div></div>`;
   }).join("");
   return `<section class="calendar-day"><header><b>${day.toLocaleDateString("tr-TR", { weekday: "short", day: "numeric", month: "short" })}</b></header>${rows || empty("Planlanmış iş yok")}</section>`;
 }
