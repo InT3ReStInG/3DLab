@@ -12,6 +12,9 @@ let reorderOriginal = [];
 let draggedPrinterId = null;
 let calendarMode = "day";
 let calendarDate = startOfDay(new Date());
+let calendarSelectedPrinters = new Set();
+let calendarKnownPrinters = new Set();
+let calendarFilterInitialized = false;
 
 const statusText = {
   free: "UYGUN",
@@ -289,7 +292,47 @@ function mondayOf(value) {
   return addDays(date, 1 - day);
 }
 
+function syncCalendarFilter() {
+  const ids = printers.map(printer => printer.id);
+  if (!calendarFilterInitialized) {
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem("pl750-calendar-printers") || "[]"); } catch (_) {}
+    const validSaved = saved.filter(id => ids.includes(id));
+    calendarSelectedPrinters = new Set(validSaved.length ? validSaved : ids);
+    calendarKnownPrinters = new Set(ids);
+    calendarFilterInitialized = true;
+    return;
+  }
+  ids.forEach(id => {
+    if (!calendarKnownPrinters.has(id)) calendarSelectedPrinters.add(id);
+  });
+  calendarSelectedPrinters = new Set([...calendarSelectedPrinters].filter(id => ids.includes(id)));
+  calendarKnownPrinters = new Set(ids);
+  if (!calendarSelectedPrinters.size && ids.length) calendarSelectedPrinters.add(ids[0]);
+}
+
+function saveCalendarFilter() {
+  try { localStorage.setItem("pl750-calendar-printers", JSON.stringify([...calendarSelectedPrinters])); } catch (_) {}
+}
+
+function renderCalendarFilters() {
+  syncCalendarFilter();
+  $("#calendarFilterLabel").textContent = `${calendarSelectedPrinters.size}/${printers.length}`;
+  $("#calendarPrinterFilters").innerHTML = printers.map(printer => `<label><input type="checkbox" data-calendar-printer="${printer.id}" ${calendarSelectedPrinters.has(printer.id) ? "checked" : ""}><i style="background:${esc(printer.color)}"></i><span>${esc(printer.name)}</span></label>`).join("");
+  document.querySelectorAll("[data-calendar-printer]").forEach(input => input.onchange = () => {
+    if (input.checked) calendarSelectedPrinters.add(input.dataset.calendarPrinter);
+    else if (calendarSelectedPrinters.size > 1) calendarSelectedPrinters.delete(input.dataset.calendarPrinter);
+    else {
+      input.checked = true;
+      return toast("Takvimde en az bir yazıcı seçili olmalıdır");
+    }
+    saveCalendarFilter();
+    renderCalendar();
+  });
+}
+
 function renderCalendar() {
+  renderCalendarFilters();
   const first = calendarMode === "week" ? mondayOf(calendarDate) : startOfDay(calendarDate);
   const days = Array.from({ length: calendarMode === "week" ? 7 : 1 }, (_, index) => addDays(first, index));
   $("#calendarDate").value = dateValue(calendarDate);
@@ -305,7 +348,7 @@ function renderCalendar() {
 function calendarDay(day) {
   const dayStart = startOfDay(day).getTime();
   const dayEnd = addDays(dayStart, 1).getTime();
-  const rows = printers.map(printer => {
+  const rows = printers.filter(printer => calendarSelectedPrinters.has(printer.id)).map(printer => {
     const events = scheduleEvents(printer).filter(item => item.startAt < dayEnd && item.endAt > dayStart);
     if (calendarMode === "week" && !events.length && printer.status !== "maintenance") return "";
     const content = printer.status === "maintenance"
@@ -592,6 +635,12 @@ $("#calendarPrev").onclick = () => { calendarDate = addDays(calendarDate, calend
 $("#calendarNext").onclick = () => { calendarDate = addDays(calendarDate, calendarMode === "week" ? 7 : 1); renderCalendar(); };
 $("#calendarToday").onclick = () => { calendarDate = startOfDay(new Date()); renderCalendar(); };
 $("#calendarDate").onchange = event => { if (event.target.value) calendarDate = startOfDay(`${event.target.value}T00:00:00`); renderCalendar(); };
+$("#calendarShowAll").onclick = event => {
+  event.preventDefault();
+  calendarSelectedPrinters = new Set(printers.map(printer => printer.id));
+  saveCalendarFilter();
+  renderCalendar();
+};
 $("#closeModal").onclick = closeModal;
 $("#modal").onclick = event => { if (event.target === $("#modal")) closeModal(); };
 setInterval(render, 30000);
