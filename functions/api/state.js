@@ -83,6 +83,26 @@ async function readState(db) {
   };
   let changed = false;
   state.printers = state.printers.map(printer => {
+    if (["printing", "finished"].includes(printer.status) && printer.endsAt && !printer.startedAt) {
+      const matchingEntries = state.activity.filter(entry =>
+        Number(entry.at) <= Number(printer.endsAt)
+        && /Baskı başlatıldı|Sıradaki baskı başlatıldı/.test(String(entry.action || ""))
+        && String(entry.detail || "").includes(String(printer.job || ""))
+      );
+      const strictMatch = matchingEntries.find(entry => String(entry.detail || "").includes(String(printer.name || "")));
+      const recovered = strictMatch || matchingEntries[0];
+      if (recovered?.at) {
+        printer = {
+          ...printer,
+          startedAt: Number(recovered.at),
+          duration: Math.max(1, Math.round((Number(printer.endsAt) - Number(recovered.at)) / 60000)),
+        };
+        changed = true;
+      } else if (printer.duration) {
+        printer = { ...printer, startedAt: Number(printer.endsAt) - minutes(printer.duration) * 60000 };
+        changed = true;
+      }
+    }
     if (printer.status === "printing" && printer.endsAt && printer.endsAt <= Date.now()) {
       changed = true;
       return { ...printer, status: "finished" };
