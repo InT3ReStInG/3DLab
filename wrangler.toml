@@ -1,4 +1,4 @@
-name = "PASTE_YOUR_WORKER_NAME_HERE"
+name = "afd750-wsdsg"
 main = "worker.js"
 compatibility_date = "2026-08-18"
 
@@ -9,5 +9,5 @@ run_worker_first = [ "/api/*" ]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "printers-lab-750-db"
-database_id = "PASTE_YOUR_DATABASE_ID_HERE"
+database_name = "pd750-gewh43"
+database_id = "681def5d-b65b-426a-9c7e-19861470571e"
