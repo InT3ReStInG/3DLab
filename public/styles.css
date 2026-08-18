@@ -107,6 +107,14 @@ button { color: inherit; }
 .queue-row span { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .queue-row small { margin-top: 3px; color: #7e8998; font-size: 8px; }
 .queue-row strong { font-size: 10px; white-space: nowrap; }
+.next-printer-row { min-height: 66px; padding: 12px 17px; display: grid; grid-template-columns: 5px 110px minmax(0, 1fr); gap: 10px; align-items: center; border-bottom: 1px solid #edf0f4; }
+.next-printer-row:last-child { border-bottom: 0; }
+.next-printer-row > i { height: 34px; border-radius: 4px; }
+.next-printer-name b, .next-printer-job b, .next-printer-job span, .next-printer-job small { display: block; }
+.next-printer-name b { font-size: 10px; }
+.next-printer-job b { font-size: 10px; }
+.next-printer-job span { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.next-printer-job small { margin-top: 3px; color: #7e8998; font-size: 8px; }
 .row-actions { display: flex; gap: 5px; }
 .row-actions button { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: #536074; font-size: 8px; cursor: pointer; }
 .row-actions .danger-link { color: var(--red); }
@@ -200,6 +208,7 @@ footer { padding: 24px 2px 30px; display: flex; justify-content: space-between; 
   .activity-meta b { max-width: 78px; overflow: hidden; text-overflow: ellipsis; }
   .queue-row { grid-template-columns: 20px 4px minmax(0, 1fr) auto; }
   .queue-row .row-actions { grid-column: 3 / -1; }
+  .next-printer-row { grid-template-columns: 5px 82px minmax(0, 1fr); padding: 11px 12px; }
   .calendar-controls input { flex: 1 1 130px; }
   .calendar-filter-bar { justify-content: stretch; }
   .printer-filter { width: 100%; }

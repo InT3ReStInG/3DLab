@@ -157,6 +157,26 @@ function queueRows() {
   return printers.flatMap(printer => queueSlots(printer));
 }
 
+function plannedRows() {
+  return printers.flatMap(printer => {
+    if (printer.status === "maintenance") return [];
+    const queued = queueSlots(printer).map(item => ({ ...item, type: "queue" }));
+    const reservations = printer.reservations
+      .filter(item => item.endAt > Date.now())
+      .map(item => ({
+        ...item,
+        type: "reservation",
+        name: item.purpose,
+        duration: Math.max(1, Math.round((item.endAt - item.startAt) / 60000)),
+        printerId: printer.id,
+        printer: printer.name,
+        color: printer.color,
+        reservationId: item.id,
+      }));
+    return [...queued, ...reservations];
+  }).sort((a, b) => a.startAt - b.startAt);
+}
+
 function mergedBusyIntervals(printer) {
   const intervals = scheduleEvents(printer)
     .filter(item => item.endAt > Date.now())
@@ -216,15 +236,15 @@ function render() {
     <div class="stat"><b>${counts.printing}</b><span>Baskıda</span></div>
     <div class="stat"><b>${counts.attention}</b><span>İlgilenilmeli</span></div>`;
 
-  const rows = queueRows();
+  const rows = plannedRows();
   $("#queueCount").textContent = rows.length;
   $("#printerRail").classList.toggle("is-reordering", reorderMode);
   $("#printerRail").innerHTML = printers.map((printer, index) => card(printer, index)).join("")
     + (reorderMode ? "" : `<button class="add-card" data-add><i>＋</i><b>YAZICI EKLE</b><small>Yeni cihaz kaydet</small></button>`);
   $("#recentActivity").innerHTML = activity.slice(0, 5).map(item => activityRow(item, false)).join("") || empty("Henüz işlem yok");
   $("#allActivity").innerHTML = activity.map(item => activityRow(item, true)).join("") || empty("Henüz işlem yok");
-  $("#shortQueue").innerHTML = rows.slice(0, 5).map((item, index) => queueRow(item, index, false)).join("") || empty("Sırada iş yok");
-  $("#allQueue").innerHTML = rows.map((item, index) => queueRow(item, index, true)).join("") || empty("Sırada iş yok");
+  $("#shortQueue").innerHTML = printers.filter(printer => printer.status !== "maintenance").map(nextPrinterRow).join("") || empty("Gösterilecek yazıcı yok");
+  $("#allQueue").innerHTML = rows.map((item, index) => plannedRow(item, index)).join("") || empty("Planlanmış iş yok");
   $("#reorderButton").textContent = reorderMode ? "Sıralamayı kaydet" : "↕ Sıralamayı düzenle";
   $("#cancelReorder").classList.toggle("hidden", !reorderMode);
   $("#reorderHint").textContent = reorderMode ? "Kartları sürükleyin veya okları kullanın." : "Kartlara basarak baskı ekleyebilirsiniz.";
@@ -265,8 +285,22 @@ function activityRow(item, exact) {
   return `<div class="activity-row"><i class="activity-dot"></i><div><b>${esc(item.action)}</b><p>${esc(item.detail)}</p></div><div class="activity-meta"><b>${esc(item.user)}</b><span>${exact ? dateTime(item.at) : relative(item.at)}</span></div></div>`;
 }
 
-function queueRow(item, index, actions) {
-  return `<div class="queue-row"><span>${String(index + 1).padStart(2, "0")}</span><i style="background:${esc(item.color)}"></i><div><b>${esc(item.name)}</b><span>${esc(item.owner)} · ${esc(item.printer)}</span><small>${dateTime(item.startAt)} → ${timeValue(item.endAt)}</small></div><strong>${durationText(item.duration)}</strong>${actions ? `<div class="row-actions"><button data-edit-queue="${item.printerId}" data-job="${item.id}">Düzenle</button><button class="danger-link" data-delete-queue="${item.printerId}" data-job="${item.id}">Sil</button></div>` : ""}</div>`;
+function nextPrinterRow(printer) {
+  const next = plannedRows().find(item => item.printerId === printer.id);
+  const content = printer.status === "finished"
+    ? `<b>Temizlenmeyi bekliyor</b><span>Baskı tamamlandı</span>`
+    : next
+    ? `<b>${esc(next.name)}</b><span>${next.type === "reservation" ? "Rezervasyon" : "Sıradaki iş"} · ${esc(next.owner)}</span><small>${dateTime(next.startAt)} → ${timeValue(next.endAt)}</small>`
+    : `<b>Uygun</b><span>${esc(availabilitySummary(printer))}</span>`;
+  return `<div class="next-printer-row"><i style="background:${esc(printer.color)}"></i><div class="next-printer-name"><b>${esc(printer.name)}</b></div><div class="next-printer-job">${content}</div></div>`;
+}
+
+function plannedRow(item, index) {
+  const type = item.type === "reservation" ? "Rezervasyon" : "Sıra";
+  const actions = item.type === "reservation"
+    ? `<div class="row-actions"><button class="danger-link" data-cancel-reservation="${item.printerId}" data-reservation="${item.reservationId}">İptal et</button></div>`
+    : `<div class="row-actions"><button data-edit-queue="${item.printerId}" data-job="${item.id}">Düzenle</button><button class="danger-link" data-delete-queue="${item.printerId}" data-job="${item.id}">Sil</button></div>`;
+  return `<div class="queue-row"><span>${String(index + 1).padStart(2, "0")}</span><i style="background:${esc(item.color)}"></i><div><b>${esc(item.name)}</b><span>${type} · ${esc(item.owner)} · ${esc(item.printer)}</span><small>${dateTime(item.startAt)} → ${timeValue(item.endAt)}</small></div><strong>${durationText(item.duration)}</strong>${actions}</div>`;
 }
 
 function empty(text) {
