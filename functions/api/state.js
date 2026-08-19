@@ -235,6 +235,24 @@ function applyAction(state, body) {
     return;
   }
 
+  if (action === "editCurrentPrintName") {
+    if (!["printing", "finished"].includes(printer.status) || !printer.job) throw new Error("Mevcut baskı bulunamadı");
+    replacePrinter(state, { ...printer, job: requireText(body.name, "Baskı adı") });
+    return;
+  }
+
+  if (action === "editScheduledPrintName") {
+    const reservation = printer.reservations.find(item => item.id === body.reservationId && item.kind === "scheduled");
+    if (!reservation) throw new Error("Planlı baskı bulunamadı");
+    replacePrinter(state, {
+      ...printer,
+      reservations: printer.reservations.map(item => item.id === reservation.id
+        ? { ...item, purpose: requireText(body.name, "Baskı adı") }
+        : item),
+    });
+    return;
+  }
+
   if (action === "startJob") {
     if (["maintenance", "broken"].includes(printer.status)) throw new Error(printer.status === "broken" ? "Arızalı yazıcıya iş eklenemez" : "Bakımdaki yazıcıya iş eklenemez");
     const job = {
