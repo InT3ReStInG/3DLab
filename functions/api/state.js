@@ -197,7 +197,7 @@ function applyAction(state, body) {
   if (!printer) throw new Error("Yazıcı bulunamadı");
 
   if (action === "startJob") {
-    if (printer.status === "maintenance") throw new Error("Bakımdaki yazıcıya iş eklenemez");
+    if (["maintenance", "broken"].includes(printer.status)) throw new Error(printer.status === "broken" ? "Arızalı yazıcıya iş eklenemez" : "Bakımdaki yazıcıya iş eklenemez");
     const job = {
       id: crypto.randomUUID(),
       name: requireText(body.job?.name, "İş adı"),
@@ -291,17 +291,19 @@ function applyAction(state, body) {
   }
 
   if (action === "setMaintenance") {
-    const active = Boolean(body.active);
-    if (active && printer.status === "printing") throw new Error("Devam eden baskı varken bakım modu açılamaz");
-    const next = { ...printer, status: active ? "maintenance" : "free" };
-    if (active) next.maintenanceNote = requireText(body.note, "Bakım nedeni");
+    const requested = ["maintenance", "broken", "free"].includes(body.status)
+      ? body.status
+      : body.active ? "maintenance" : "free";
+    if (requested !== "free" && printer.status === "printing") throw new Error("Devam eden baskı varken servis durumu değiştirilemez");
+    const next = { ...printer, status: requested };
+    if (requested !== "free") next.maintenanceNote = requireText(body.note, requested === "broken" ? "Arıza açıklaması" : "Bakım nedeni");
     else delete next.maintenanceNote;
     replacePrinter(state, next);
     return;
   }
 
   if (action === "addReservation" || action === "addScheduledPrint") {
-    if (printer.status === "maintenance") throw new Error("Bakımdaki yazıcı rezerve edilemez");
+    if (["maintenance", "broken"].includes(printer.status)) throw new Error(printer.status === "broken" ? "Arızalı yazıcı rezerve edilemez" : "Bakımdaki yazıcı rezerve edilemez");
     const reservation = {
       id: crypto.randomUUID(),
       purpose: requireText(body.reservation?.purpose, "Amaç"),
