@@ -20,8 +20,11 @@ button { color: inherit; }
 .hidden { display: none !important; }
 
 .topbar { height: 72px; background: linear-gradient(to bottom, var(--navy) calc(100% - 5px), var(--red) 0); color: #fff; }
-.topbar .wrap { height: 100%; display: flex; align-items: center; }
+.topbar .wrap { height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .topbar strong { font-size: 17px; letter-spacing: .01em; }
+.top-clock { min-width: 0; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+.top-clock b { font-size: 15px; letter-spacing: .04em; }
+.top-clock span { max-width: 280px; margin-top: 4px; overflow: hidden; color: #dbe7f4; font-size: 9px; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
 .hero { padding: 38px 0 26px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .hero h1 { margin: 0; font-size: clamp(30px, 4vw, 42px); letter-spacing: -.035em; }
 .hero p { margin: 9px 0 0; color: var(--muted); font-size: 14px; }
@@ -45,8 +48,13 @@ button { color: inherit; }
 .printer-card, .add-card { position: relative; min-height: 370px; overflow: hidden; scroll-snap-align: start; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 1px 2px #1018280a; }
 .printer-card::before { content: ""; position: absolute; inset: 0 0 auto; height: 3px; background: var(--accent); }
 .card-top { display: flex; align-items: center; justify-content: space-between; padding: 15px 15px 0; }
-.status { color: var(--muted); font-size: 9px; font-weight: 700; }
+.status { padding: 5px 8px; display: inline-flex; align-items: center; border-radius: 999px; background: #f2f4f7; color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .02em; }
 .status i { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--accent); }
+.status-printing { border-color: #b9ccef; box-shadow: 0 3px 14px #2563eb12; }
+.status-printing .status { background: #eaf2ff; color: #2055a5; }
+.status-finished { border-color: #a9d9c8; box-shadow: 0 3px 14px #16845b12; }
+.status-finished .status { background: #e8f7f1; color: #126a4a; }
+.status-maintenance .status { background: #fff4d9; color: #8a5a15; }
 .trash { opacity: 0; padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; color: #929baa; font-size: 17px; cursor: pointer; }
 .printer-card:hover .trash, .printer-card:focus-within .trash { opacity: 1; }
 .trash:hover { background: var(--red); color: #fff; }
@@ -55,6 +63,14 @@ button { color: inherit; }
 .printer-icon { height: 112px; display: grid; place-items: center; }
 .printer-icon span { position: relative; width: 72px; height: 72px; display: grid; place-items: center; border-radius: 12px; background: #f4f6f9; color: var(--accent); font-size: 35px; }
 .printer-icon b { position: absolute; top: 80px; color: var(--text); font-size: 12px; white-space: nowrap; }
+.printer-icon em { font-style: normal; }
+.state-symbol { position: relative; z-index: 2; }
+.state-spinner { position: absolute; z-index: 1; inset: 5px; border: 4px solid #dce6f5; border-top-color: var(--accent); border-right-color: var(--accent); border-radius: 50%; animation: printer-spin 1.15s linear infinite; }
+.status-printing .printer-icon span { background: #edf4ff; }
+.state-check { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: #fff; font-size: 38px; font-weight: 800; box-shadow: 0 0 0 7px #dff3eb; }
+.status-finished .printer-icon span { background: #edf9f4; }
+@keyframes printer-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .state-spinner { animation-duration: 2.5s; } }
 .printer-card h3 { margin: 4px 0 8px; font-size: 15px; }
 .printer-card p { margin: 0; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .printer-card .job { color: var(--text); font-size: 12px; }
@@ -124,17 +140,18 @@ button { color: inherit; }
 .full { min-height: 440px; }
 
 .calendar-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.calendar-controls > button, .segmented button, .calendar-controls input { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #536074; font-size: 10px; cursor: pointer; }
-.calendar-controls input { cursor: text; }
-.calendar-filter-bar { padding: 9px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: #fbfcfd; }
+.calendar-controls > button, .segmented button, .today-badge { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #536074; font-size: 10px; cursor: pointer; }
+.today-badge { display: inline-flex; align-items: center; cursor: default; white-space: nowrap; }
+#calendarView { position: relative; overflow: visible; }
+.calendar-filter-bar { position: relative; z-index: 40; padding: 9px 14px; overflow: visible; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: #fbfcfd; }
 .calendar-filter-bar > span { color: #738093; font-size: 9px; }
-.printer-filter { position: relative; }
+.printer-filter { position: relative; z-index: 41; }
 .printer-filter summary { min-width: 148px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #536074; font-size: 10px; cursor: pointer; list-style: none; }
 .printer-filter summary::-webkit-details-marker { display: none; }
 .printer-filter summary::after { content: "▾"; color: #7c8796; }
 .printer-filter[open] summary::after { content: "▴"; }
 .printer-filter summary span { margin-left: auto; padding: 1px 6px; border-radius: 12px; background: #edf2f8; color: var(--navy); font-size: 8px; }
-.printer-filter-menu { position: absolute; z-index: 8; top: calc(100% + 6px); right: 0; width: 230px; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: #fff; box-shadow: 0 12px 30px #1720331f; }
+.printer-filter-menu { position: absolute; z-index: 100; top: calc(100% + 6px); right: 0; width: 230px; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: #fff; box-shadow: 0 12px 30px #1720331f; }
 .printer-filter-menu label { min-height: 34px; padding: 6px 7px; display: grid; grid-template-columns: 16px 7px 1fr; gap: 8px; align-items: center; border-radius: 6px; color: #465265; font-size: 10px; cursor: pointer; }
 .printer-filter-menu label:hover { background: #f4f7fa; }
 .printer-filter-menu label input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
@@ -170,7 +187,8 @@ button { color: inherit; }
 .calendar-event button { width: 24px; height: 24px; flex: 0 0 auto; border: 0; border-radius: 50%; background: #fff8; color: var(--red); cursor: pointer; }
 .available-slot { padding: 12px; border: 1px dashed #cbd5df; border-radius: 7px; color: var(--green); font-size: 9px; }
 
-.timeline-scroll { position: relative; max-height: 72vh; overflow: auto; background: #fff; overscroll-behavior: contain; scrollbar-gutter: stable; }
+#calendarGrid { position: relative; z-index: 1; overflow: hidden; border-radius: 0 0 12px 12px; }
+.timeline-scroll { position: relative; z-index: 1; max-height: 72vh; overflow: auto; background: #fff; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .timeline-board { min-width: var(--timeline-min-width); display: grid; grid-template-columns: 84px minmax(0, 1fr); grid-template-rows: 48px var(--timeline-height); }
 .timeline-corner { position: sticky; z-index: 8; top: 0; left: 0; padding: 0 9px; display: flex; align-items: center; border-right: 1px solid #cfd6df; border-bottom: 1px solid #cfd6df; background: #eef2f6; color: #596678; font-size: 8px; font-weight: 750; letter-spacing: .04em; }
 .timeline-printer-heads { position: sticky; z-index: 7; top: 0; display: grid; grid-template-columns: repeat(var(--printer-count), minmax(190px, 1fr)); border-bottom: 1px solid #cfd6df; background: #f8fafc; }
@@ -243,7 +261,7 @@ button { color: inherit; }
 .horizontal-event.compact span { display: none; }
 .horizontal-event button { width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: 50%; background: #fff9; color: var(--red); cursor: pointer; }
 
-.modal-backdrop { position: fixed; z-index: 20; inset: 0; padding: 18px; display: grid; place-items: center; background: #11182766; backdrop-filter: blur(3px); }
+.modal-backdrop { position: fixed; z-index: 200; inset: 0; padding: 18px; display: grid; place-items: center; background: #11182766; backdrop-filter: blur(3px); }
 .modal-card { position: relative; width: min(440px, 100%); max-height: 92vh; overflow: auto; padding: 30px; border-radius: 14px; background: #fff; box-shadow: 0 20px 60px #11182733; }
 .modal-close { position: absolute; right: 14px; top: 10px; border: 0; background: transparent; color: #7b8492; font-size: 27px; cursor: pointer; }
 .form { display: flex; flex-direction: column; gap: 15px; }
@@ -285,7 +303,8 @@ footer { padding: 24px 2px 30px; display: flex; justify-content: space-between; 
   .queue-row { grid-template-columns: 20px 4px minmax(0, 1fr) auto; }
   .queue-row .row-actions { grid-column: 3 / -1; }
   .next-printer-row { grid-template-columns: 5px 82px minmax(0, 1fr); padding: 11px 12px; }
-  .calendar-controls input { flex: 1 1 130px; }
+  .today-badge { flex: 1 1 150px; justify-content: center; }
+  .top-clock span { max-width: 185px; font-size: 8px; }
   .calendar-filter-bar { align-items: stretch; flex-direction: column; }
   .printer-filter { width: 100%; }
   .printer-filter summary { width: 100%; }

@@ -17,6 +17,9 @@ let calendarKnownPrinters = new Set();
 let calendarFilterInitialized = false;
 let calendarScroll = { top: 0, left: 0 };
 let calendarShouldFocusNow = true;
+let rememberedActor = "";
+
+try { rememberedActor = sessionStorage.getItem("pl750-actor") || ""; } catch (_) {}
 
 const statusText = {
   free: "UYGUN",
@@ -48,6 +51,14 @@ function timeValue(value) {
 
 function dateTime(value) {
   return new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function updateHeaderClock() {
+  const now = new Date();
+  $("#headerTime").textContent = now.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  $("#headerDate").textContent = now.toLocaleDateString("tr-TR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const calendarTodayDate = $("#calendarTodayDate");
+  if (calendarTodayDate) calendarTodayDate.textContent = `Bugün · ${now.toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" })}`;
 }
 
 function remaining(at) {
@@ -102,6 +113,13 @@ function makeEntry(action, detail, user) {
 function samePerson(first, second) {
   const clean = value => String(value || "").trim().replace(/\s+/g, " ");
   return clean(first).localeCompare(clean(second), "tr", { sensitivity: "base" }) === 0;
+}
+
+function rememberActor(value) {
+  const actor = String(value || "").trim();
+  if (!actor) return;
+  rememberedActor = actor;
+  try { sessionStorage.setItem("pl750-actor", actor); } catch (_) {}
 }
 
 async function api(body) {
@@ -276,7 +294,13 @@ function render() {
 }
 
 function card(printer, index) {
-  const icon = printer.status === "maintenance" ? "⚙" : "▣";
+  const icon = printer.status === "printing"
+    ? `<i class="state-spinner" aria-hidden="true"></i><em class="state-symbol">▣</em><b>${remaining(printer.endsAt)}</b>`
+    : printer.status === "finished"
+    ? `<em class="state-check" aria-label="Baskı tamamlandı">✓</em>`
+    : printer.status === "maintenance"
+    ? `<em class="state-symbol">⚙</em>`
+    : `<em class="state-symbol">▣</em>`;
   const queueNote = printer.queue.length ? `<span class="queue-note">${printer.queue.length} iş sırada</span>` : "";
   const availability = `<span class="availability-line">${esc(availabilitySummary(printer))}</span>`;
   let body;
@@ -300,7 +324,7 @@ function card(printer, index) {
 
   return `<article class="printer-card status-${printer.status} ${reorderMode ? "reorder-mode" : ""}" data-printer="${printer.id}" draggable="${reorderMode}" style="--accent:${esc(printer.color)}">
     <div class="card-top"><span class="status"><i></i>${statusText[printer.status]}</span><button class="trash" data-delete="${printer.id}" aria-label="${esc(printer.name)} yazıcısını sil">⌫</button></div>
-    <button class="printer-main" data-open="${printer.id}" ${reorderMode ? "disabled" : ""}><div class="printer-icon"><span>${icon}${printer.status === "printing" ? `<b>${remaining(printer.endsAt)}</b>` : ""}</span></div><h3>${esc(printer.name)}</h3>${body}</button>
+    <button class="printer-main" data-open="${printer.id}" ${reorderMode ? "disabled" : ""}><div class="printer-icon"><span>${icon}</span></div><h3>${esc(printer.name)}</h3>${body}</button>
     ${reorderControls || `<div class="card-tools"><button data-reserve="${printer.id}">▦ Rezerve et</button><button data-edit-printer="${printer.id}">✎ Düzenle</button>${printer.status === "printing" ? `<button class="cancel-print" data-cancel-print="${printer.id}" aria-label="Mevcut baskıyı iptal et" title="Mevcut baskıyı iptal et">■</button>` : `<button data-maintenance="${printer.id}" aria-label="Bakım">⚙</button>`}</div>`}
   </article>`;
 }
@@ -398,7 +422,6 @@ function renderCalendar() {
   const totalHours = dayCount * 24;
   const hourWidth = { day: 44, week: 12, twoWeeks: 8, threeWeeks: 7 }[calendarMode];
   const selected = printers.filter(printer => calendarSelectedPrinters.has(printer.id));
-  $("#calendarDate").value = dateValue(calendarDate);
   $("#calendarDay").classList.toggle("active", calendarMode === "day");
   $("#calendarWeek").classList.toggle("active", calendarMode === "week");
   $("#calendarTwoWeeks").classList.toggle("active", calendarMode === "twoWeeks");
@@ -518,7 +541,13 @@ function showModal(html, onSubmit) {
   $("#modalContent").innerHTML = html;
   $("#modal").classList.remove("hidden");
   const form = $("#modalContent form");
-  if (form && onSubmit) form.onsubmit = onSubmit;
+  const actorInput = form?.querySelector('[name="actor"]');
+  if (actorInput && rememberedActor) actorInput.value = rememberedActor;
+  if (form && onSubmit) form.onsubmit = event => {
+    const submittedActor = form.querySelector('[name="actor"]')?.value;
+    if (submittedActor) rememberActor(submittedActor);
+    return onSubmit(event);
+  };
   setTimeout(() => $("#modalContent input")?.focus(), 20);
 }
 
@@ -579,9 +608,14 @@ function startQueuedForm(printer) {
 }
 
 function clearFinished(printer) {
-  const actor = prompt("Yazıcıyı boşaltmak için adınızı girin:")?.trim();
-  if (!actor || !confirm(`${printer.name} boşaltılıp uygun olarak işaretlensin mi?`)) return;
-  mutate("clearFinished", { printerId: printer.id }, makeEntry("Yazıcı boşaltıldı", `${printer.job} · ${printer.name}`, actor)).catch(() => {});
+  showModal(`<form class="form"><h2>Yazıcıyı boşalt</h2><p class="form-intro"><b>${esc(printer.name)}</b> uygun olarak işaretlenecek.<br><br>Tamamlanan iş: ${esc(printer.job || "—")}</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><button class="submit danger">EVET, YAZICIYI BOŞALT</button></form>`, async event => {
+    event.preventDefault();
+    const actor = String(new FormData(event.currentTarget).get("actor")).trim();
+    closeModal();
+    try {
+      await mutate("clearFinished", { printerId: printer.id }, makeEntry("Yazıcı boşaltıldı", `${printer.job} · ${printer.name}`, actor));
+    } catch (_) {}
+  });
 }
 
 function cancelCurrentPrint(id) {
@@ -650,12 +684,18 @@ function editQueueForm(printerId, jobId) {
 function deleteQueueJob(printerId, jobId) {
   const printer = printers.find(item => item.id === printerId);
   const job = printer.queue.find(item => item.id === jobId);
-  const actor = prompt("Sıra işini silmek için adınızı girin:")?.trim();
-  if (!actor || !confirm(`“${job.name}” sıradan silinsin mi?`)) return;
-  const ownJob = samePerson(actor, job.owner);
-  const action = ownJob ? "Sıra işi sahibi tarafından silindi" : "Sıra işi başka biri tarafından silindi";
-  const detail = `${job.name} · ${printer.name} · İş sahibi: ${job.owner}`;
-  mutate("deleteQueueJob", { printerId, jobId }, makeEntry(action, detail, actor)).catch(() => {});
+  if (!printer || !job) return toast("Sıra işi bulunamadı");
+  showModal(`<form class="form"><h2>Sıra işini sil</h2><p class="form-intro"><b>“${esc(job.name)}”</b> sıradan silinsin mi?<br><br>${esc(printer.name)} · İş sahibi: ${esc(job.owner)}</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><button class="submit danger">EVET, SIRADAN SİL</button></form>`, async event => {
+    event.preventDefault();
+    const actor = String(new FormData(event.currentTarget).get("actor")).trim();
+    const ownJob = samePerson(actor, job.owner);
+    const action = ownJob ? "Sıra işi sahibi tarafından silindi" : "Sıra işi başka biri tarafından silindi";
+    const detail = `${job.name} · ${printer.name} · İş sahibi: ${job.owner}`;
+    closeModal();
+    try {
+      await mutate("deleteQueueJob", { printerId, jobId }, makeEntry(action, detail, actor));
+    } catch (_) {}
+  });
 }
 
 function scheduledPrintForm(printerId, suggestedStart) {
@@ -707,18 +747,24 @@ function reserveForm(id) {
 
 function cancelReservation(printerId, reservationId) {
   const printer = printers.find(item => item.id === printerId);
-  const reservation = printer.reservations.find(item => item.id === reservationId);
+  const reservation = printer?.reservations?.find(item => item.id === reservationId);
+  if (!printer || !reservation) return toast("Planlanan iş bulunamadı");
   const scheduled = reservation.kind === "scheduled";
   const noun = scheduled ? "planlı baskıyı" : "rezervasyonu";
-  const actor = prompt(`${noun[0].toUpperCase() + noun.slice(1)} iptal etmek için adınızı girin:`)?.trim();
-  if (!actor || !confirm(`“${reservation.purpose}” ${noun} iptal edilsin mi?`)) return;
-  const ownReservation = samePerson(actor, reservation.owner);
-  const action = scheduled
-    ? ownReservation ? "Planlı baskı sahibi tarafından iptal edildi" : "Planlı baskı başka biri tarafından iptal edildi"
-    : ownReservation ? "Rezervasyon sahibi tarafından iptal edildi" : "Rezervasyon başka biri tarafından iptal edildi";
   const ownerLabel = scheduled ? "Baskı sahibi" : "Rezervasyon sahibi";
-  const detail = `${reservation.purpose} · ${printer.name} · ${dateTime(reservation.startAt)} · ${ownerLabel}: ${reservation.owner}`;
-  mutate("deleteReservation", { printerId, reservationId }, makeEntry(action, detail, actor)).catch(() => {});
+  showModal(`<form class="form"><h2>${scheduled ? "Planlı baskıyı" : "Rezervasyonu"} iptal et</h2><p class="form-intro"><b>“${esc(reservation.purpose)}”</b> ${noun} iptal etmek istediğinize emin misiniz?<br><br>${esc(printer.name)} · ${dateTime(reservation.startAt)}<br>${ownerLabel}: ${esc(reservation.owner)}</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><button class="submit danger">EVET, İPTAL ET</button></form>`, async event => {
+    event.preventDefault();
+    const actor = String(new FormData(event.currentTarget).get("actor")).trim();
+    const ownReservation = samePerson(actor, reservation.owner);
+    const action = scheduled
+      ? ownReservation ? "Planlı baskı sahibi tarafından iptal edildi" : "Planlı baskı başka biri tarafından iptal edildi"
+      : ownReservation ? "Rezervasyon sahibi tarafından iptal edildi" : "Rezervasyon başka biri tarafından iptal edildi";
+    const detail = `${reservation.purpose} · ${printer.name} · ${dateTime(reservation.startAt)} · ${ownerLabel}: ${reservation.owner}`;
+    closeModal();
+    try {
+      await mutate("deleteReservation", { printerId, reservationId }, makeEntry(action, detail, actor));
+    } catch (_) {}
+  });
 }
 
 function maintenanceForm(id) {
@@ -738,19 +784,27 @@ function maintenanceForm(id) {
 
 function removePrinter(id) {
   const printer = printers.find(item => item.id === id);
-  const actor = prompt(`${printer.name} yazıcısını silmek için adınızı girin:`)?.trim();
-  if (!actor || !confirm(`${printer.name} silinsin mi? Geçmiş kayıtları korunacaktır.`)) return;
-  mutate("deletePrinter", { printerId: id }, makeEntry("Yazıcı silindi", printer.name, actor)).catch(() => {});
+  if (!printer) return toast("Yazıcı bulunamadı");
+  showModal(`<form class="form"><h2>Yazıcıyı sil</h2><p class="form-intro"><b>${esc(printer.name)}</b> sistemden silinecek. İşlem geçmişi korunacaktır.</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><button class="submit danger">EVET, YAZICIYI SİL</button></form>`, async event => {
+    event.preventDefault();
+    const actor = String(new FormData(event.currentTarget).get("actor")).trim();
+    closeModal();
+    try {
+      await mutate("deletePrinter", { printerId: id }, makeEntry("Yazıcı silindi", printer.name, actor));
+    } catch (_) {}
+  });
 }
 
 function beginOrSaveReorder() {
   if (!reorderMode) {
-    const actor = prompt("Sıralamayı değiştiren kişinin adı:")?.trim();
-    if (!actor) return;
-    reorderActor = actor;
-    reorderOriginal = printers.map(printer => printer.id);
-    reorderMode = true;
-    render();
+    showModal(`<form class="form"><h2>Yazıcıları sırala</h2><p class="form-intro">Kartları sürükleyerek veya ok düğmelerini kullanarak yazıcıların sırasını değiştirebilirsiniz.</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><button class="submit">SIRALAMAYI BAŞLAT</button></form>`, event => {
+      event.preventDefault();
+      reorderActor = String(new FormData(event.currentTarget).get("actor")).trim();
+      reorderOriginal = printers.map(printer => printer.id);
+      reorderMode = true;
+      closeModal();
+      render();
+    });
     return;
   }
   const order = printers.map(printer => printer.id);
@@ -806,7 +860,6 @@ $("#calendarThreeWeeks").onclick = () => { calendarMode = "threeWeeks"; calendar
 $("#calendarPrev").onclick = () => { calendarDate = addDays(calendarDate, -({ day: 1, week: 7, twoWeeks: 14, threeWeeks: 21 }[calendarMode])); calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarNext").onclick = () => { calendarDate = addDays(calendarDate, { day: 1, week: 7, twoWeeks: 14, threeWeeks: 21 }[calendarMode]); calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarToday").onclick = () => { calendarDate = startOfDay(new Date()); calendarShouldFocusNow = true; renderCalendar(); };
-$("#calendarDate").onchange = event => { if (event.target.value) calendarDate = startOfDay(`${event.target.value}T00:00:00`); calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarShowAll").onclick = event => {
   event.preventDefault();
   calendarSelectedPrinters = new Set(printers.map(printer => printer.id));
@@ -815,5 +868,7 @@ $("#calendarShowAll").onclick = event => {
 };
 $("#closeModal").onclick = closeModal;
 $("#modal").onclick = event => { if (event.target === $("#modal")) closeModal(); };
+updateHeaderClock();
+setInterval(updateHeaderClock, 1000);
 setInterval(render, 30000);
 load();
