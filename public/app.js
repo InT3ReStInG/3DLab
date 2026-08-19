@@ -26,6 +26,7 @@ const statusText = {
   printing: "BASKI YAPIYOR",
   finished: "TAMAMLANDI",
   maintenance: "BAKIMDA",
+  broken: "ARIZALI",
 };
 
 function startOfDay(value) {
@@ -215,7 +216,7 @@ function queueRows() {
 
 function plannedRows() {
   return printers.flatMap(printer => {
-    if (printer.status === "maintenance") return [];
+    if (["maintenance", "broken"].includes(printer.status)) return [];
     const queued = queueSlots(printer).map(item => ({ ...item, type: "queue" }));
     const reservations = printer.reservations
       .filter(item => item.endAt > Date.now())
@@ -257,13 +258,14 @@ function friendlyAvailabilityTime(value) {
 
 function availabilitySummary(printer) {
   if (printer.status === "maintenance") return "Bakımda · uygunluk zamanı bilinmiyor";
+  if (printer.status === "broken") return "Arızalı · uygunluk zamanı bilinmiyor";
   const now = Date.now();
   const twoDays = 48 * 60 * 60000;
   const intervals = mergedBusyIntervals(printer);
   let availableAt = now;
   let index = 0;
 
-  while (index < intervals.length && intervals[index].startAt <= availableAt) {
+  while (index < intervals.length && intervals[index].startAt <= availableAt + 60000) {
     availableAt = Math.max(availableAt, intervals[index].endAt);
     index += 1;
   }
@@ -271,10 +273,10 @@ function availabilitySummary(printer) {
   const nextBusyAt = intervals[index]?.startAt;
   const availableFor = nextBusyAt ? nextBusyAt - availableAt : Infinity;
 
-  if (availableAt <= now + 60000 && availableFor >= twoDays) return "Önümüzdeki 2 gün planlanmış baskı yok";
-  const startText = availableAt <= now + 60000 ? "Şimdi uygun" : `Sonraki uygun: ${friendlyAvailabilityTime(availableAt)}`;
+  if (availableAt <= now + 1000 && availableFor >= twoDays) return "Önümüzdeki 2 gün planlanmış baskı yok";
+  const startText = availableAt <= now + 1000 ? "Şimdi uygun" : `Sonraki uygun: ${friendlyAvailabilityTime(availableAt)}`;
   if (availableFor >= twoDays) return `${startText} · en az 2 gün uygun`;
-  return `${startText} · ${durationText(Math.max(1, Math.floor(availableFor / 60000)))} uygun`;
+  return `${startText} · ${durationText(Math.max(1, Math.ceil(availableFor / 60000)))} uygun`;
 }
 
 function approachingPlan(printer) {
@@ -299,7 +301,7 @@ function render() {
   const counts = {
     free: printers.filter(printer => printer.status === "free").length,
     printing: printers.filter(printer => printer.status === "printing").length,
-    attention: printers.filter(printer => ["finished", "maintenance"].includes(printer.status)).length,
+    attention: printers.filter(printer => ["finished", "maintenance", "broken"].includes(printer.status)).length,
   };
   $("#stats").innerHTML = `
     <div class="stat"><b>${counts.free}</b><span>Uygun</span></div>
@@ -313,7 +315,7 @@ function render() {
     + (reorderMode ? "" : `<button class="add-card" data-add><i>＋</i><b>YAZICI EKLE</b><small>Yeni cihaz kaydet</small></button>`);
   $("#recentActivity").innerHTML = activity.slice(0, 5).map(item => activityRow(item, false)).join("") || empty("Henüz işlem yok");
   $("#allActivity").innerHTML = activity.map(item => activityRow(item, true)).join("") || empty("Henüz işlem yok");
-  $("#shortQueue").innerHTML = printers.filter(printer => printer.status !== "maintenance").map(nextPrinterRow).join("") || empty("Gösterilecek yazıcı yok");
+  $("#shortQueue").innerHTML = printers.filter(printer => !["maintenance", "broken"].includes(printer.status)).map(nextPrinterRow).join("") || empty("Gösterilecek yazıcı yok");
   $("#allQueue").innerHTML = rows.map((item, index) => plannedRow(item, index)).join("") || empty("Planlanmış iş yok");
   $("#reorderButton").textContent = reorderMode ? "Sıralamayı kaydet" : "↕ Sıralamayı düzenle";
   $("#cancelReorder").classList.toggle("hidden", !reorderMode);
@@ -323,15 +325,18 @@ function render() {
 }
 
 function card(printer, index) {
+  const serviceLocked = ["maintenance", "broken"].includes(printer.status);
   const icon = printer.status === "printing"
     ? `<i class="state-spinner" aria-hidden="true"></i><em class="state-symbol">▣</em><b>${remaining(printer.endsAt)}</b>`
     : printer.status === "finished"
     ? `<em class="state-check" aria-label="Baskı tamamlandı">✓</em>`
     : printer.status === "maintenance"
     ? `<em class="state-symbol">⚙</em>`
+    : printer.status === "broken"
+    ? `<em class="state-broken" aria-label="Arızalı">×</em>`
     : `<em class="state-symbol">▣</em>`;
   const queueNote = printer.queue.length ? `<span class="queue-note">${printer.queue.length} iş sırada</span>` : "";
-  const warningText = printer.status === "maintenance" ? "" : approachingPlanText(printer);
+  const warningText = ["maintenance", "broken"].includes(printer.status) ? "" : approachingPlanText(printer);
   const planWarning = warningText ? `<span class="upcoming-warning">⚠ ${esc(warningText)}</span>` : "";
   const availability = `<span class="availability-line">${esc(availabilitySummary(printer))}</span>`;
   let body;
@@ -341,6 +346,8 @@ function card(printer, index) {
       : `<p>Yeni bir iş için hazır</p><span class="primary-action">＋ BASKI EKLE</span>${planWarning}${availability}`;
   } else if (printer.status === "maintenance") {
     body = `<p>${esc(printer.maintenanceNote)}</p><span class="maintenance-action">SERVİS DIŞI</span>${availability}`;
+  } else if (printer.status === "broken") {
+    body = `<p>${esc(printer.maintenanceNote)}</p><span class="broken-action">ARIZALI · SERVİS DIŞI</span>${availability}`;
   } else {
     const progress = printProgress(printer);
     body = `<p class="job">${esc(printer.job)}</p><span class="owner">◯ ${esc(printer.owner)}</span><div class="progress"><i style="width:${progress}%"></i></div><div class="time-row"><span>İlerleme</span><b>%${progress}</b></div><div class="time-row"><span>${printer.status === "finished" ? "Temizlenmeyi bekliyor" : "Tahmini kalan süre"}</span><b>${remaining(printer.endsAt)}</b></div>${queueNote}${planWarning}${availability}`;
@@ -356,7 +363,7 @@ function card(printer, index) {
   return `<article class="printer-card status-${printer.status} ${reorderMode ? "reorder-mode" : ""}" data-printer="${printer.id}" draggable="${reorderMode}" style="--accent:${esc(printer.color)}">
     <div class="card-top"><span class="status"><i></i>${statusText[printer.status]}</span><button class="trash" data-delete="${printer.id}" aria-label="${esc(printer.name)} yazıcısını sil">⌫</button></div>
     <button class="printer-main" data-open="${printer.id}" ${reorderMode ? "disabled" : ""}><div class="printer-icon"><span>${icon}</span></div><h3>${esc(printer.name)}</h3>${body}</button>
-    ${reorderControls || `<div class="card-tools"><button data-reserve="${printer.id}">▦ Rezerve et</button><button data-edit-printer="${printer.id}">✎ Düzenle</button>${printer.status === "printing" ? `<button class="cancel-print" data-cancel-print="${printer.id}" aria-label="Mevcut baskıyı iptal et" title="Mevcut baskıyı iptal et">■</button>` : `<button data-maintenance="${printer.id}" aria-label="Bakım">⚙</button>`}</div>`}
+    ${reorderControls || `<div class="card-tools"><button data-reserve="${printer.id}" ${serviceLocked ? "disabled" : ""}>▦ Rezerve et</button><button data-edit-printer="${printer.id}">✎ Düzenle</button>${printer.status === "printing" ? `<button class="cancel-print" data-cancel-print="${printer.id}" aria-label="Mevcut baskıyı iptal et" title="Mevcut baskıyı iptal et">■</button>` : `<button data-maintenance="${printer.id}" aria-label="Servis durumu" title="Bakım / arıza durumu">⚙</button>`}</div>`}
   </article>`;
 }
 
@@ -524,9 +531,10 @@ function horizontalPrinterLabel(printer) {
 }
 
 function horizontalLane(printer, rangeStart, rangeEnd, hourWidth) {
-  if (printer.status === "maintenance") {
+  if (["maintenance", "broken"].includes(printer.status)) {
     const width = (rangeEnd - rangeStart) / 3600000 * hourWidth;
-    return `<div class="horizontal-lane" data-calendar-lane="${printer.id}"><div class="horizontal-event maintenance" style="left:3px;width:${Math.max(30, width - 6)}px"><b>Servis dışı</b><span>${esc(printer.maintenanceNote || "Bakım modu")}</span></div></div>`;
+    const broken = printer.status === "broken";
+    return `<div class="horizontal-lane" data-calendar-lane="${printer.id}"><div class="horizontal-event ${broken ? "broken" : "maintenance"}" style="left:3px;width:${Math.max(30, width - 6)}px"><b>${broken ? "✕ Arızalı" : "Bakımda"}</b><span>${esc(printer.maintenanceNote || (broken ? "Servis dışı" : "Bakım modu"))}</span></div></div>`;
   }
   const events = scheduleEvents(printer)
     .filter(item => item.startAt < rangeEnd && item.endAt > rangeStart)
@@ -612,6 +620,7 @@ function openPrinter(id) {
   const printer = printers.find(item => item.id === id);
   if (!printer || reorderMode) return;
   if (printer.status === "maintenance") return toast("Bu yazıcı bakımda");
+  if (printer.status === "broken") return toast("Bu yazıcı arızalı");
   if (printer.status === "finished") return clearFinished(printer);
   if (printer.status === "free" && printer.queue.length) return startQueuedForm(printer);
   jobForm(printer);
@@ -810,15 +819,19 @@ function cancelReservation(printerId, reservationId) {
 
 function maintenanceForm(id) {
   const printer = printers.find(item => item.id === id);
-  const active = printer.status === "maintenance";
-  showModal(`<form class="form"><h2>${active ? "Servise döndür" : "Bakım modu"}</h2><p class="form-intro">${active ? `${esc(printer.name)} şu anda servis dışı.` : `${esc(printer.name)} üzerinde yeni iş ve rezervasyon başlatılmasını engelleyin.`}</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label>${active ? "" : `<label>Neden<input name="note" required placeholder="Örn. Nozul değişimi"></label>`}<button class="submit ${active ? "" : "danger"}">${active ? "UYGUN OLARAK İŞARETLE" : "BAKIM MODUNU AÇ"}</button></form>`, async event => {
+  if (!printer) return toast("Yazıcı bulunamadı");
+  const current = ["maintenance", "broken"].includes(printer.status) ? printer.status : "maintenance";
+  showModal(`<form class="form"><h2>Yazıcı durumu</h2><p class="form-intro"><b>${esc(printer.name)}</b> için servis durumunu seçin. Arızalı, tamamen servis dışı olan cihazlar içindir.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Durum<select name="status" required><option value="maintenance" ${current === "maintenance" ? "selected" : ""}>Bakımda</option><option value="broken" ${current === "broken" ? "selected" : ""}>Arızalı</option><option value="free">Uygun / servise döndü</option></select></label><label>Açıklama<input name="note" value="${esc(printer.maintenanceNote || "")}" placeholder="Örn. Nozul değişimi veya arıza açıklaması"></label><button class="submit">DURUMU KAYDET</button></form>`, async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const actor = String(form.get("actor")).trim();
-    const note = active ? "" : String(form.get("note")).trim();
+    const status = String(form.get("status"));
+    const note = String(form.get("note")).trim();
+    if (status !== "free" && !note) return toast("Bakım veya arıza açıklaması girin");
+    const action = status === "broken" ? "Yazıcı arızalı olarak işaretlendi" : status === "maintenance" ? "Bakım modu açıldı" : "Yazıcı servise döndürüldü";
     closeModal();
     try {
-      await mutate("setMaintenance", { printerId: id, active: !active, note }, makeEntry(active ? "Bakım modu kapatıldı" : "Bakım modu açıldı", `${note || "Uygun"} · ${printer.name}`, actor));
+      await mutate("setMaintenance", { printerId: id, status, note }, makeEntry(action, `${note || "Uygun"} · ${printer.name}`, actor));
     } catch (_) {}
   });
 }
