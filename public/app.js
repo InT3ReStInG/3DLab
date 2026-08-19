@@ -53,6 +53,20 @@ function dateTime(value) {
   return new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
 }
 
+function makeId() {
+  const cryptoApi = window.crypto || window.msCrypto;
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoApi.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return `pl750-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 function updateHeaderClock() {
   const now = new Date();
   $("#headerTime").textContent = now.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -107,7 +121,7 @@ function relative(at) {
 }
 
 function makeEntry(action, detail, user) {
-  return { id: crypto.randomUUID(), action, detail, user: user.trim(), at: Date.now() };
+  return { id: makeId(), action, detail, user: user.trim(), at: Date.now() };
 }
 
 function samePerson(first, second) {
@@ -639,7 +653,7 @@ function addForm() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const actor = String(form.get("actor")).trim();
-    const printer = { id: crypto.randomUUID(), name: String(form.get("name")).trim(), color: String(form.get("color")), status: "free", queue: [], reservations: [] };
+    const printer = { id: makeId(), name: String(form.get("name")).trim(), color: String(form.get("color")), status: "free", queue: [], reservations: [] };
     closeModal();
     try {
       await mutate("addPrinter", { printer }, makeEntry("Yazıcı eklendi", printer.name, actor));
