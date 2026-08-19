@@ -251,7 +251,7 @@ function applyAction(state, body) {
     return;
   }
 
-  if (action === "addReservation") {
+  if (action === "addReservation" || action === "addScheduledPrint") {
     if (printer.status === "maintenance") throw new Error("Bakımdaki yazıcı rezerve edilemez");
     const reservation = {
       id: crypto.randomUUID(),
@@ -259,6 +259,7 @@ function applyAction(state, body) {
       owner: requireText(body.reservation?.owner, "Ad"),
       startAt: Number(body.reservation?.startAt),
       endAt: Number(body.reservation?.endAt),
+      kind: action === "addScheduledPrint" ? "scheduled" : "reservation",
     };
     if (!Number.isFinite(reservation.startAt) || !Number.isFinite(reservation.endAt) || reservation.endAt <= reservation.startAt) throw new Error("Rezervasyon zamanı geçersiz");
     if (reservation.startAt < Date.now() - 60000) throw new Error("Geçmiş bir saate rezervasyon yapılamaz");
