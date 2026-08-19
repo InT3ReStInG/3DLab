@@ -11,6 +11,7 @@ function normalizePrinter(printer) {
     ...printer,
     queue: Array.isArray(printer.queue) ? printer.queue : [],
     reservations: Array.isArray(printer.reservations) ? printer.reservations : [],
+    printHistory: Array.isArray(printer.printHistory) ? printer.printHistory : [],
   };
 }
 
@@ -109,6 +110,43 @@ async function readState(db) {
     }
     return printer;
   });
+
+  const now = Date.now();
+  state.printers = state.printers.map(printer => {
+    if (printer.status !== "free") return printer;
+    const due = printer.reservations
+      .filter(item => item.kind === "scheduled" && Number(item.startAt) <= now)
+      .sort((a, b) => Number(a.startAt) - Number(b.startAt));
+    if (!due.length) return printer;
+
+    const active = due.find(item => Number(item.endAt) > now);
+    const current = active || due[due.length - 1];
+    const archived = due
+      .filter(item => item.id !== current.id)
+      .map(item => ({ id: `print-${item.id}`, label: item.purpose, owner: item.owner, startAt: Number(item.startAt), endAt: Number(item.endAt) }));
+    const dueIds = new Set(due.map(item => item.id));
+    const finished = Number(current.endAt) <= now;
+    const next = {
+      ...printer,
+      status: finished ? "finished" : "printing",
+      job: current.purpose,
+      owner: current.owner,
+      startedAt: Number(current.startAt),
+      endsAt: Number(current.endAt),
+      duration: Math.max(1, Math.round((Number(current.endAt) - Number(current.startAt)) / 60000)),
+      reservations: printer.reservations.filter(item => !dueIds.has(item.id)),
+      printHistory: [...printer.printHistory, ...archived].slice(-100),
+    };
+    state.activity.unshift({
+      id: crypto.randomUUID(),
+      action: finished ? "Planlı baskı otomatik tamamlandı" : "Planlı baskı otomatik başlatıldı",
+      detail: `${current.purpose} · ${printer.name}`,
+      user: "Sistem",
+      at: now,
+    });
+    changed = true;
+    return next;
+  });
   if (changed) await writeState(db, state);
   return state;
 }
@@ -196,7 +234,18 @@ function applyAction(state, body) {
 
   if (action === "clearFinished") {
     if (printer.status !== "finished") throw new Error("Bu baskı henüz tamamlanmadı");
-    const next = { ...printer, status: "free" };
+    const completedPrint = printer.startedAt && printer.endsAt ? {
+      id: `print-${crypto.randomUUID()}`,
+      label: printer.job,
+      owner: printer.owner,
+      startAt: Number(printer.startedAt),
+      endAt: Number(printer.endsAt),
+    } : null;
+    const next = {
+      ...printer,
+      status: "free",
+      printHistory: completedPrint ? [...printer.printHistory, completedPrint].slice(-100) : printer.printHistory,
+    };
     delete next.job;
     delete next.owner;
     delete next.duration;
