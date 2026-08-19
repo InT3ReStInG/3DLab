@@ -586,7 +586,6 @@ function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
   const completed = item.endAt <= Date.now() && ["print", "scheduled"].includes(item.type);
   const upcoming = item.startAt > Date.now() && item.startAt - Date.now() <= 60 * 60000 && ["reservation", "scheduled"].includes(item.type);
   const cancel = item.type === "reservation" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Rezervasyonu iptal et">×</button>` : "";
-  const scheduledCancel = item.type === "scheduled" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Planlı baskıyı iptal et">×</button>` : "";
   const interaction = item.active
     ? `data-active-calendar-print="${printer.id}"`
     : item.archived
@@ -594,7 +593,7 @@ function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
     : item.type === "scheduled"
     ? `data-calendar-scheduled="${item.reservationId}" data-scheduled-printer="${printer.id}"`
     : "";
-  return `<div class="horizontal-event ${item.type} ${completed ? "completed" : ""} ${upcoming ? "upcoming" : ""} ${interaction ? "interactive" : ""} ${width < 105 ? "compact" : ""}" ${interaction} style="left:${left + 2}px;width:${Math.max(24, width - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}${completed ? " · Tamamlandı" : upcoming ? " · Bir saatten az kaldı" : ""}"><div><small>${completed ? "✓ Tamamlandı" : upcoming ? `⚠ ${remaining(item.startAt)} kaldı` : typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${completed ? "" : cancel || scheduledCancel}</div>`;
+  return `<div class="horizontal-event ${item.type} ${completed ? "completed" : ""} ${upcoming ? "upcoming" : ""} ${interaction ? "interactive" : ""} ${width < 105 ? "compact" : ""}" ${interaction} style="left:${left + 2}px;width:${Math.max(24, width - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}${completed ? " · Tamamlandı" : upcoming ? " · Bir saatten az kaldı" : ""}"><div><small>${completed ? "✓ Tamamlandı" : upcoming ? `⚠ ${remaining(item.startAt)} kaldı` : typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${completed ? "" : cancel}</div>`;
 }
 
 function bindDynamicControls() {
@@ -727,7 +726,10 @@ function activePrintInfo(id) {
   if (!printer || printer.status !== "printing") return toast("Devam eden baskı bulunamadı");
   const progress = printProgress(printer);
   const startedAt = printStartedAt(printer);
-  showModal(`<div class="info-sheet"><small>DEVAM EDEN BASKI</small><h2>${esc(printer.job)}</h2><p>${esc(printer.name)} · ${esc(printer.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${startedAt ? dateTime(startedAt) : "—"}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(printer.endsAt)}</b></div><div><span>İlerleme</span><b>%${progress}</b></div><div><span>Kalan süre</span><b>${remaining(printer.endsAt)}</b></div></div><div class="modal-progress"><i style="width:${progress}%"></i></div><button class="submit danger" id="calendarCancelCurrent">BASKIYI İPTAL ET</button></div>`);
+  showModal(`<div class="info-sheet"><small>DEVAM EDEN BASKI</small><input class="inline-title-input" id="currentPrintName" value="${esc(printer.job)}" aria-label="Baskı adını düzenle"><small class="inline-edit-hint">Adı değiştirip Enter'a basın veya dışarı dokunun</small><p>${esc(printer.name)} · ${esc(printer.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${startedAt ? dateTime(startedAt) : "—"}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(printer.endsAt)}</b></div><div><span>İlerleme</span><b>%${progress}</b></div><div><span>Kalan süre</span><b>${remaining(printer.endsAt)}</b></div></div><div class="modal-progress"><i style="width:${progress}%"></i></div><button class="submit danger" id="calendarCancelCurrent">BASKIYI İPTAL ET</button></div>`);
+  bindInlinePrintName($("#currentPrintName"), printer.job, async name => {
+    await mutate("editCurrentPrintName", { printerId: id, name }, makeEntry("Devam eden baskının adı değiştirildi", `${printer.job} → ${name} · ${printer.name}`, rememberedActor || "Oturum kullanıcısı"), "Baskı adı güncellendi");
+  });
   $("#calendarCancelCurrent").onclick = () => {
     closeModal();
     cancelCurrentPrint(id);
@@ -956,10 +958,44 @@ function scheduledPrintInfo(printerId, reservationId) {
   if (!printer || !reservation) return toast("Planlı baskı bulunamadı");
   const duration = Math.max(1, Math.round((Number(reservation.endAt) - Number(reservation.startAt)) / 60000));
   const untilStart = Number(reservation.startAt) > Date.now() ? remaining(reservation.startAt) : "Başlangıç zamanı geldi";
-  showModal(`<div class="info-sheet"><small>PLANLI BASKI</small><h2>${esc(reservation.purpose)}</h2><p>${esc(printer.name)} · ${esc(reservation.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${dateTime(reservation.startAt)}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(reservation.endAt)}</b></div><div><span>Baskı süresi</span><b>${durationText(duration)}</b></div><div><span>Başlangıca kalan</span><b>${esc(untilStart)}</b></div></div><button class="submit danger" id="calendarCancelScheduled">PLANLI BASKIYI İPTAL ET</button></div>`);
+  showModal(`<div class="info-sheet"><small>PLANLI BASKI</small><input class="inline-title-input" id="scheduledPrintName" value="${esc(reservation.purpose)}" aria-label="Planlı baskı adını düzenle"><small class="inline-edit-hint">Adı değiştirip Enter'a basın veya dışarı dokunun</small><p>${esc(printer.name)} · ${esc(reservation.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${dateTime(reservation.startAt)}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(reservation.endAt)}</b></div><div><span>Baskı süresi</span><b>${durationText(duration)}</b></div><div><span>Başlangıca kalan</span><b>${esc(untilStart)}</b></div></div><button class="submit danger" id="calendarCancelScheduled">PLANLI BASKIYI İPTAL ET</button></div>`);
+  bindInlinePrintName($("#scheduledPrintName"), reservation.purpose, async name => {
+    await mutate("editScheduledPrintName", { printerId, reservationId, name }, makeEntry("Planlı baskının adı değiştirildi", `${reservation.purpose} → ${name} · ${printer.name}`, rememberedActor || "Oturum kullanıcısı"), "Planlı baskı adı güncellendi");
+  });
   $("#calendarCancelScheduled").onclick = () => {
     closeModal();
     cancelReservation(printerId, reservationId);
+  };
+}
+
+function bindInlinePrintName(input, originalName, save) {
+  if (!input) return;
+  input.onkeydown = event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    }
+    if (event.key === "Escape") {
+      input.value = originalName;
+      input.blur();
+    }
+  };
+  input.onchange = async () => {
+    const name = input.value.trim();
+    if (!name) {
+      input.value = originalName;
+      return toast("Baskı adı boş bırakılamaz");
+    }
+    if (name === originalName) return;
+    input.disabled = true;
+    try {
+      await save(name);
+      input.value = name;
+    } catch (_) {
+      input.value = originalName;
+    } finally {
+      input.disabled = false;
+    }
   };
 }
 

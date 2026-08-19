@@ -321,6 +321,11 @@ button { color: inherit; }
 .info-sheet { display: flex; flex-direction: column; gap: 14px; }
 .info-sheet > small { color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .08em; }
 .info-sheet h2 { margin: -5px 0 0; font-size: 25px; }
+.inline-title-input { width: 100%; margin: -6px 0 0; padding: 3px 5px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--navy); font: inherit; font-size: 25px; font-weight: 750; }
+.inline-title-input:hover { border-color: #d7dce3; background: #f8fafc; }
+.inline-title-input:focus { border-color: var(--blue); background: #fff; outline: 0; box-shadow: 0 0 0 3px #2563eb18; }
+.inline-title-input:disabled { opacity: .6; }
+.info-sheet > .inline-edit-hint { margin-top: -11px; color: #8b95a4; font-size: 8px; font-weight: 500; letter-spacing: 0; }
 .info-sheet > p { margin: -6px 0 2px; color: var(--muted); font-size: 11px; }
 .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .info-grid > div { padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
