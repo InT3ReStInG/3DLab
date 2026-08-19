@@ -248,6 +248,7 @@ button { color: inherit; }
 .horizontal-now-line span { position: sticky; top: 68px; margin-left: 5px; padding: 2px 5px; display: block; width: max-content; border-radius: 4px; background: var(--red); color: #fff; font-size: 7px; font-style: normal; white-space: nowrap; }
 .horizontal-now-progress { position: absolute; left: 6px; min-width: 36px; padding: 4px 6px; transform: translateY(-50%); border: 1px solid var(--red); border-radius: 999px; background: #fff; color: var(--red); box-shadow: 0 2px 7px #17203324; font-size: 9px; font-style: normal; font-weight: 800; line-height: 1; text-align: center; white-space: nowrap; }
 .horizontal-event { position: absolute; z-index: 4; top: 7px; height: 72px; min-width: 24px; padding: 8px 9px; overflow: hidden; display: flex; justify-content: space-between; gap: 6px; border-left: 3px solid var(--blue); border-radius: 7px; background: #dfeaff; color: #20304a; box-shadow: 0 2px 5px #1720331c; cursor: default; }
+.horizontal-event.print:not(.completed) { background: repeating-linear-gradient(115deg, #dfeaff 0 10px, #cbdcff 10px 18px, #e8f0ff 18px 28px); background-size: 40px 40px; animation: active-print-flow 1.05s linear infinite; }
 .horizontal-event.reservation { border-color: var(--red); background: #ffe5e8; }
 .horizontal-event.scheduled { border-color: #7c3aed; background: #eee7ff; }
 .horizontal-event.queue { border-color: #7b8798; background: #e9edf2; }
@@ -266,6 +267,8 @@ button { color: inherit; }
 .horizontal-event.compact b { margin-top: 4px; font-size: 8px; }
 .horizontal-event.compact span { display: none; }
 .horizontal-event button { width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: 50%; background: #fff9; color: var(--red); cursor: pointer; }
+@keyframes active-print-flow { to { background-position: 40px 0; } }
+@media (prefers-reduced-motion: reduce) { .horizontal-event.print:not(.completed) { animation-duration: 3s; } }
 
 .modal-backdrop { position: fixed; z-index: 200; inset: 0; padding: 18px; display: grid; place-items: center; background: #11182766; backdrop-filter: blur(3px); }
 .modal-card { position: relative; width: min(440px, 100%); max-height: 92vh; overflow: auto; padding: 30px; border-radius: 14px; background: #fff; box-shadow: 0 20px 60px #11182733; }
