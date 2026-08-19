@@ -106,7 +106,17 @@ button { color: inherit; }
 .add-card small { margin-top: 5px; font-size: 10px; }
 
 .is-reordering .printer-card { cursor: grab; border-color: #a9bddd; box-shadow: 0 5px 18px #123f7317; }
-.is-reordering .printer-card.dragging { opacity: .45; }
+.is-reordering .printer-card { touch-action: none; user-select: none; -webkit-user-select: none; }
+.is-reordering .printer-main { cursor: grab; }
+.is-reordering .trash { display: none; }
+.is-reordering .printer-card.dragging { opacity: .22; transform: scale(.985); }
+.is-reordering .printer-card.drop-before, .is-reordering .printer-card.drop-after { border-color: var(--blue); box-shadow: 0 7px 22px #2563eb24; }
+.is-reordering .printer-card.drop-before::after, .is-reordering .printer-card.drop-after::after { content: ""; position: absolute; z-index: 12; top: 9px; bottom: 9px; width: 4px; border-radius: 4px; background: var(--blue); box-shadow: 0 0 0 4px #dbeafe, 0 0 14px #2563eb66; }
+.is-reordering .printer-card.drop-before::after { left: 4px; }
+.is-reordering .printer-card.drop-after::after { right: 4px; }
+.reorder-dragging, .reorder-dragging * { cursor: grabbing !important; }
+.reorder-ghost { position: fixed !important; z-index: 250; margin: 0; pointer-events: none; opacity: .9; transform: rotate(1deg) scale(.96); transform-origin: center; border-color: #8cabdb !important; box-shadow: 0 18px 42px #17203338 !important; }
+.reorder-ghost::after { content: "Taşınıyor"; position: absolute; top: 10px; right: 10px; padding: 5px 8px; border-radius: 999px; background: var(--blue); color: #fff; font-size: 8px; font-weight: 800; letter-spacing: .03em; }
 .reorder-controls { position: absolute; inset: auto 0 0; height: 42px; display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; border-top: 1px solid var(--line); background: #edf4ff; }
 .reorder-controls span { text-align: center; color: var(--navy); font-size: 10px; font-weight: 700; }
 .reorder-controls button { height: 100%; border: 0; background: transparent; color: var(--blue); cursor: pointer; }

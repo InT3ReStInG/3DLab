@@ -9,7 +9,8 @@ let tab = "fleet";
 let reorderMode = false;
 let reorderActor = "";
 let reorderOriginal = [];
-let draggedPrinterId = null;
+let reorderDrag = null;
+let reorderScrollFrame = null;
 let calendarMode = "day";
 let calendarDate = startOfDay(new Date());
 let calendarSelectedPrinters = new Set();
@@ -158,6 +159,7 @@ function toast(message) {
 }
 
 async function load(silent = false) {
+  if (silent && reorderMode) return;
   try {
     const data = await api();
     printers = (data.printers || []).map(normalizePrinter);
@@ -319,7 +321,7 @@ function render() {
   $("#allQueue").innerHTML = rows.map((item, index) => plannedRow(item, index)).join("") || empty("Planlanmış iş yok");
   $("#reorderButton").textContent = reorderMode ? "Sıralamayı kaydet" : "↕ Sıralamayı düzenle";
   $("#cancelReorder").classList.toggle("hidden", !reorderMode);
-  $("#reorderHint").textContent = reorderMode ? "Kartları sürükleyin veya okları kullanın." : "Kartlara basarak baskı ekleyebilirsiniz.";
+  $("#reorderHint").textContent = reorderMode ? "Kartı sürükleyin; kenara götürünce liste otomatik kayar." : "Kartlara basarak baskı ekleyebilirsiniz.";
   renderCalendar();
   bindDynamicControls();
 }
@@ -360,9 +362,9 @@ function card(printer, index) {
       <button data-move="1" data-id="${printer.id}" ${index === printers.length - 1 ? "disabled" : ""}>→</button>
     </div>` : "";
 
-  return `<article class="printer-card status-${printer.status} ${reorderMode ? "reorder-mode" : ""}" data-printer="${printer.id}" draggable="${reorderMode}" style="--accent:${esc(printer.color)}">
+  return `<article class="printer-card status-${printer.status} ${reorderMode ? "reorder-mode" : ""}" data-printer="${printer.id}" draggable="false" style="--accent:${esc(printer.color)}">
     <div class="card-top"><span class="status"><i></i>${statusText[printer.status]}</span><button class="trash" data-delete="${printer.id}" aria-label="${esc(printer.name)} yazıcısını sil">⌫</button></div>
-    <button class="printer-main" data-open="${printer.id}" ${reorderMode ? "disabled" : ""}><div class="printer-icon"><span>${icon}</span></div><h3>${esc(printer.name)}</h3>${body}</button>
+    <button class="printer-main" data-open="${printer.id}" aria-disabled="${reorderMode}"><div class="printer-icon"><span>${icon}</span></div><h3>${esc(printer.name)}</h3>${body}</button>
     ${reorderControls || `<div class="card-tools"><button data-reserve="${printer.id}" ${serviceLocked ? "disabled" : ""}>▦ Rezerve et</button><button data-edit-printer="${printer.id}">✎ Düzenle</button>${printer.status === "printing" ? `<button class="cancel-print" data-cancel-print="${printer.id}" aria-label="Mevcut baskıyı iptal et" title="Mevcut baskıyı iptal et">■</button>` : `<button data-maintenance="${printer.id}" aria-label="Servis durumu" title="Bakım / arıza durumu">⚙</button>`}</div>`}
   </article>`;
 }
@@ -573,13 +575,7 @@ function bindDynamicControls() {
 
   if (reorderMode) {
     document.querySelectorAll("[data-printer]").forEach(cardElement => {
-      cardElement.ondragstart = () => { draggedPrinterId = cardElement.dataset.printer; cardElement.classList.add("dragging"); };
-      cardElement.ondragend = () => { draggedPrinterId = null; cardElement.classList.remove("dragging"); };
-      cardElement.ondragover = event => event.preventDefault();
-      cardElement.ondrop = event => {
-        event.preventDefault();
-        reorderBefore(draggedPrinterId, cardElement.dataset.printer);
-      };
+      cardElement.onpointerdown = startReorderDrag;
     });
   }
 }
@@ -870,26 +866,165 @@ function beginOrSaveReorder() {
 }
 
 function cancelReorder() {
+  finishReorderDrag(true);
   printers.sort((a, b) => reorderOriginal.indexOf(a.id) - reorderOriginal.indexOf(b.id));
   reorderMode = false;
   render();
 }
 
-function reorderBefore(sourceId, targetId) {
-  if (!sourceId || sourceId === targetId) return;
+function capturePrinterPositions() {
+  return new Map([...document.querySelectorAll("#printerRail [data-printer]")].map(element => [element.dataset.printer, element.getBoundingClientRect()]));
+}
+
+function animatePrinterPositions(previous) {
+  requestAnimationFrame(() => {
+    document.querySelectorAll("#printerRail [data-printer]").forEach(element => {
+      const before = previous.get(element.dataset.printer);
+      const after = element.getBoundingClientRect();
+      if (!before) return;
+      const offset = before.left - after.left;
+      if (Math.abs(offset) < 1) return;
+      element.style.transition = "none";
+      element.style.transform = `translateX(${offset}px)`;
+      requestAnimationFrame(() => {
+        element.style.transition = "transform 220ms cubic-bezier(.2,.8,.2,1), box-shadow 180ms ease";
+        element.style.transform = "translateX(0)";
+        element.addEventListener("transitionend", () => {
+          element.style.transition = "";
+          element.style.transform = "";
+        }, { once: true });
+      });
+    });
+  });
+}
+
+function movePrinterTo(sourceId, targetId, afterTarget) {
+  if (!sourceId || !targetId || sourceId === targetId) return false;
   const sourceIndex = printers.findIndex(item => item.id === sourceId);
-  const targetIndex = printers.findIndex(item => item.id === targetId);
+  if (sourceIndex < 0) return false;
   const [source] = printers.splice(sourceIndex, 1);
-  printers.splice(sourceIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, source);
-  render();
+  const targetIndex = printers.findIndex(item => item.id === targetId);
+  if (targetIndex < 0) {
+    printers.splice(sourceIndex, 0, source);
+    return false;
+  }
+  printers.splice(targetIndex + (afterTarget ? 1 : 0), 0, source);
+  return true;
+}
+
+function positionReorderGhost() {
+  if (!reorderDrag) return;
+  reorderDrag.ghost.style.left = `${reorderDrag.clientX - reorderDrag.offsetX}px`;
+  reorderDrag.ghost.style.top = `${reorderDrag.clientY - reorderDrag.offsetY}px`;
+}
+
+function updateReorderDropTarget() {
+  if (!reorderDrag) return;
+  const cards = [...document.querySelectorAll("#printerRail [data-printer]")]
+    .filter(element => element.dataset.printer !== reorderDrag.sourceId);
+  cards.forEach(element => element.classList.remove("drop-before", "drop-after"));
+  if (!cards.length) return;
+  const target = cards.find(element => reorderDrag.clientX <= element.getBoundingClientRect().left + element.getBoundingClientRect().width / 2) || cards[cards.length - 1];
+  const targetRect = target.getBoundingClientRect();
+  const afterTarget = target === cards[cards.length - 1] && reorderDrag.clientX > targetRect.left + targetRect.width / 2;
+  target.classList.add(afterTarget ? "drop-after" : "drop-before");
+  reorderDrag.targetId = target.dataset.printer;
+  reorderDrag.afterTarget = afterTarget;
+}
+
+function runReorderAutoScroll() {
+  if (!reorderDrag) return;
+  const rail = $("#printerRail");
+  const rect = rail.getBoundingClientRect();
+  const edge = Math.min(92, rect.width * .22);
+  let speed = 0;
+  if (reorderDrag.clientX < rect.left + edge) speed = -Math.ceil((rect.left + edge - reorderDrag.clientX) / edge * 18);
+  else if (reorderDrag.clientX > rect.right - edge) speed = Math.ceil((reorderDrag.clientX - (rect.right - edge)) / edge * 18);
+  if (speed) {
+    rail.scrollLeft += speed;
+    updateReorderDropTarget();
+  }
+  reorderScrollFrame = requestAnimationFrame(runReorderAutoScroll);
+}
+
+function onReorderPointerMove(event) {
+  if (!reorderDrag || event.pointerId !== reorderDrag.pointerId) return;
+  event.preventDefault();
+  reorderDrag.clientX = event.clientX;
+  reorderDrag.clientY = event.clientY;
+  positionReorderGhost();
+  updateReorderDropTarget();
+}
+
+function startReorderDrag(event) {
+  if (!reorderMode || reorderDrag || event.target.closest("button") || (event.pointerType === "mouse" && event.button !== 0)) return;
+  event.preventDefault();
+  const cardElement = event.currentTarget;
+  const rect = cardElement.getBoundingClientRect();
+  const ghost = cardElement.cloneNode(true);
+  ghost.removeAttribute("data-printer");
+  ghost.classList.add("reorder-ghost");
+  ghost.querySelectorAll("button").forEach(button => { button.disabled = true; });
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.height = `${rect.height}px`;
+  document.body.appendChild(ghost);
+  cardElement.classList.add("dragging");
+  document.body.classList.add("reorder-dragging");
+  reorderDrag = {
+    pointerId: event.pointerId,
+    sourceId: cardElement.dataset.printer,
+    sourceElement: cardElement,
+    ghost,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+    targetId: null,
+    afterTarget: false,
+  };
+  positionReorderGhost();
+  updateReorderDropTarget();
+  document.addEventListener("pointermove", onReorderPointerMove, { passive: false });
+  document.addEventListener("pointerup", onReorderPointerUp);
+  document.addEventListener("pointercancel", onReorderPointerCancel);
+  reorderScrollFrame = requestAnimationFrame(runReorderAutoScroll);
+}
+
+function onReorderPointerUp(event) {
+  if (reorderDrag && event.pointerId === reorderDrag.pointerId) finishReorderDrag(false);
+}
+
+function onReorderPointerCancel(event) {
+  if (reorderDrag && event.pointerId === reorderDrag.pointerId) finishReorderDrag(true);
+}
+
+function finishReorderDrag(cancelled = false) {
+  if (!reorderDrag) return;
+  const drag = reorderDrag;
+  document.querySelectorAll("#printerRail [data-printer]").forEach(element => element.classList.remove("dragging", "drop-before", "drop-after"));
+  const previous = capturePrinterPositions();
+  reorderDrag = null;
+  cancelAnimationFrame(reorderScrollFrame);
+  reorderScrollFrame = null;
+  document.removeEventListener("pointermove", onReorderPointerMove);
+  document.removeEventListener("pointerup", onReorderPointerUp);
+  document.removeEventListener("pointercancel", onReorderPointerCancel);
+  document.body.classList.remove("reorder-dragging");
+  drag.ghost.remove();
+  if (!cancelled && movePrinterTo(drag.sourceId, drag.targetId, drag.afterTarget)) {
+    render();
+    animatePrinterPositions(previous);
+  }
 }
 
 function movePrinter(id, direction) {
   const index = printers.findIndex(item => item.id === id);
   const target = index + direction;
   if (target < 0 || target >= printers.length) return;
+  const previous = capturePrinterPositions();
   [printers[index], printers[target]] = [printers[target], printers[index]];
   render();
+  animatePrinterPositions(previous);
 }
 
 function setTab(next) {
