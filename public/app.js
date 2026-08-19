@@ -5,6 +5,7 @@ const esc = value => String(value ?? "").replace(/[&<>'"]/g, character => ({
 
 let printers = [];
 let activity = [];
+let savedJobs = [];
 let tab = "fleet";
 let reorderMode = false;
 let reorderActor = "";
@@ -19,6 +20,7 @@ let calendarFilterInitialized = false;
 let calendarScroll = { top: 0, left: 0 };
 let calendarShouldFocusNow = true;
 let rememberedActor = "";
+let pendingSavedJobId = null;
 
 try { rememberedActor = sessionStorage.getItem("pl750-actor") || ""; } catch (_) {}
 
@@ -164,6 +166,7 @@ async function load(silent = false) {
     const data = await api();
     printers = (data.printers || []).map(normalizePrinter);
     activity = data.activity || [];
+    savedJobs = Array.isArray(data.savedJobs) ? data.savedJobs : [];
     render();
   } catch (error) {
     if (!silent) toast(error.message);
@@ -184,6 +187,7 @@ async function mutate(action, payload, entry, successMessage = "Kaydedildi") {
     const data = await api({ action, ...payload, entry });
     printers = (data.state?.printers || printers).map(normalizePrinter);
     activity = data.state?.activity || activity;
+    savedJobs = Array.isArray(data.state?.savedJobs) ? data.state.savedJobs : savedJobs;
     render();
     toast(successMessage);
     return data;
@@ -311,7 +315,10 @@ function render() {
     <div class="stat"><b>${counts.attention}</b><span>İlgilenilmeli</span></div>`;
 
   const rows = plannedRows();
+  const printed = completedPrintRows();
   $("#queueCount").textContent = rows.length;
+  $("#savedJobCount").textContent = savedJobs.length;
+  $("#printHistoryCount").textContent = printed.length;
   $("#printerRail").classList.toggle("is-reordering", reorderMode);
   $("#printerRail").innerHTML = printers.map((printer, index) => card(printer, index)).join("")
     + (reorderMode ? "" : `<button class="add-card" data-add><i>＋</i><b>YAZICI EKLE</b><small>Yeni cihaz kaydet</small></button>`);
@@ -319,6 +326,8 @@ function render() {
   $("#allActivity").innerHTML = activity.map(item => activityRow(item, true)).join("") || empty("Henüz işlem yok");
   $("#shortQueue").innerHTML = printers.filter(printer => !["maintenance", "broken"].includes(printer.status)).map(nextPrinterRow).join("") || empty("Gösterilecek yazıcı yok");
   $("#allQueue").innerHTML = rows.map((item, index) => plannedRow(item, index)).join("") || empty("Planlanmış iş yok");
+  $("#savedJobs").innerHTML = savedJobs.map(savedJobRow).join("") || empty("Henüz kayıtlı iş yok");
+  $("#printedJobs").innerHTML = printed.map(printedJobRow).join("") || empty("Henüz tamamlanan baskı kaydı yok");
   $("#reorderButton").textContent = reorderMode ? "Sıralamayı kaydet" : "↕ Sıralamayı düzenle";
   $("#cancelReorder").classList.toggle("hidden", !reorderMode);
   $("#reorderHint").textContent = reorderMode ? "Kartı sürükleyin; kenara götürünce liste otomatik kayar." : "Kartlara basarak baskı ekleyebilirsiniz.";
@@ -391,17 +400,36 @@ function plannedRow(item, index) {
   return `<div class="queue-row"><span>${String(index + 1).padStart(2, "0")}</span><i style="background:${esc(item.color)}"></i><div><b>${esc(item.name)}</b><span>${type} · ${esc(item.owner)} · ${esc(item.printer)}</span><small>${dateTime(item.startAt)} → ${timeValue(item.endAt)}</small></div><strong>${durationText(item.duration)}</strong>${actions}</div>`;
 }
 
+function completedPrintRows() {
+  return printers.flatMap(printer => printer.printHistory.map(item => ({
+    ...item,
+    printerId: printer.id,
+    printer: printer.name,
+    color: printer.color,
+    duration: Math.max(1, Math.round((Number(item.endAt) - Number(item.startAt)) / 60000)),
+  }))).sort((a, b) => Number(b.endAt) - Number(a.endAt));
+}
+
+function savedJobRow(job) {
+  const created = job.createdAt ? `${esc(job.createdBy || "—")} · ${dateTime(job.createdAt)}` : "Kayıtlı iş";
+  return `<div class="saved-job-row"><div class="saved-job-icon">▣</div><div><b>${esc(job.name)}</b><span>${durationText(job.duration)}</span><small>${created}</small></div><div class="row-actions"><button data-use-saved="${job.id}">Takvimde kullan</button><button data-edit-saved="${job.id}">Düzenle</button><button class="danger-link" data-delete-saved="${job.id}">Sil</button></div></div>`;
+}
+
+function printedJobRow(item) {
+  return `<button class="printed-job-row" data-printed-info="${item.printerId}" data-print-id="${item.id}"><i style="background:${esc(item.color)}"></i><div><b>${esc(item.label || item.job)}</b><span>${esc(item.printer)} · ${esc(item.owner || "—")}</span><small>${dateTime(item.startAt)} → ${dateTime(item.endAt)}</small></div><strong>${durationText(item.duration)}</strong><em>Bilgi →</em></button>`;
+}
+
 function empty(text) {
   return `<div class="empty">${text}</div>`;
 }
 
 function scheduleEvents(printer) {
   const events = [];
-  printer.printHistory.forEach(item => events.push({ ...item, type: "print", label: item.label || item.job }));
+  printer.printHistory.forEach(item => events.push({ ...item, type: "print", label: item.label || item.job, archived: true }));
   if (["printing", "finished"].includes(printer.status) && printer.endsAt) {
     const recoveredStart = printStartedAt(printer);
     const fallbackStart = printer.status === "printing" ? Math.min(Date.now(), printer.endsAt) : printer.endsAt - 60000;
-    events.push({ type: "print", label: printer.job, owner: printer.owner, startAt: recoveredStart || fallbackStart, endAt: printer.endsAt });
+    events.push({ type: "print", label: printer.job, owner: printer.owner, startAt: recoveredStart || fallbackStart, endAt: printer.endsAt, active: printer.status === "printing" });
   }
   printer.reservations.forEach(item => events.push({ ...item, type: item.kind === "scheduled" ? "scheduled" : "reservation", label: item.purpose, reservationId: item.id }));
   queueSlots(printer).forEach(item => events.push({ ...item, type: "queue", label: item.name }));
@@ -488,6 +516,9 @@ function renderCalendar() {
   $("#calendarGrid").innerHTML = selected.length ? `<div class="timeline-scroll horizontal ${calendarMode}" id="calendarTimeline"><div class="horizontal-board" style="--printer-count:${selected.length};--hour-width:${hourWidth}px;--time-width:${timeWidth}px;--timeline-min-width:${minWidth}px"><div class="horizontal-corner">Yazıcı</div><div class="horizontal-time-head">${horizontalTimeScale(first, totalHours, hourWidth)}</div><div class="horizontal-printer-labels">${selected.map(horizontalPrinterLabel).join("")}</div><div class="horizontal-lanes">${selected.map(printer => horizontalLane(printer, rangeStart, rangeEnd, hourWidth)).join("")}${dayLines}${nowLine}</div></div></div>` : empty("En az bir yazıcı seçin");
 
   document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = event => { event.stopPropagation(); cancelReservation(button.dataset.cancelReservation, button.dataset.reservation); });
+  document.querySelectorAll("[data-active-calendar-print]").forEach(eventElement => eventElement.onclick = event => { event.stopPropagation(); activePrintInfo(eventElement.dataset.activeCalendarPrint); });
+  document.querySelectorAll("[data-calendar-print-history]").forEach(eventElement => eventElement.onclick = event => { event.stopPropagation(); printHistoryInfo(eventElement.dataset.historyPrinter, eventElement.dataset.calendarPrintHistory); });
+  document.querySelectorAll("[data-calendar-scheduled]").forEach(eventElement => eventElement.onclick = event => { event.stopPropagation(); scheduledPrintInfo(eventElement.dataset.scheduledPrinter, eventElement.dataset.calendarScheduled); });
   document.querySelectorAll("[data-calendar-lane]").forEach(lane => lane.onclick = event => {
     if (event.target.closest(".horizontal-event")) return;
     const rect = lane.getBoundingClientRect();
@@ -556,7 +587,14 @@ function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
   const upcoming = item.startAt > Date.now() && item.startAt - Date.now() <= 60 * 60000 && ["reservation", "scheduled"].includes(item.type);
   const cancel = item.type === "reservation" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Rezervasyonu iptal et">×</button>` : "";
   const scheduledCancel = item.type === "scheduled" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Planlı baskıyı iptal et">×</button>` : "";
-  return `<div class="horizontal-event ${item.type} ${completed ? "completed" : ""} ${upcoming ? "upcoming" : ""} ${width < 105 ? "compact" : ""}" style="left:${left + 2}px;width:${Math.max(24, width - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}${completed ? " · Tamamlandı" : upcoming ? " · Bir saatten az kaldı" : ""}"><div><small>${completed ? "✓ Tamamlandı" : upcoming ? `⚠ ${remaining(item.startAt)} kaldı` : typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${completed ? "" : cancel || scheduledCancel}</div>`;
+  const interaction = item.active
+    ? `data-active-calendar-print="${printer.id}"`
+    : item.archived
+    ? `data-calendar-print-history="${item.id}" data-history-printer="${printer.id}"`
+    : item.type === "scheduled"
+    ? `data-calendar-scheduled="${item.reservationId}" data-scheduled-printer="${printer.id}"`
+    : "";
+  return `<div class="horizontal-event ${item.type} ${completed ? "completed" : ""} ${upcoming ? "upcoming" : ""} ${interaction ? "interactive" : ""} ${width < 105 ? "compact" : ""}" ${interaction} style="left:${left + 2}px;width:${Math.max(24, width - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}${completed ? " · Tamamlandı" : upcoming ? " · Bir saatten az kaldı" : ""}"><div><small>${completed ? "✓ Tamamlandı" : upcoming ? `⚠ ${remaining(item.startAt)} kaldı` : typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${completed ? "" : cancel || scheduledCancel}</div>`;
 }
 
 function bindDynamicControls() {
@@ -568,6 +606,10 @@ function bindDynamicControls() {
   document.querySelectorAll("[data-cancel-print]").forEach(button => button.onclick = () => cancelCurrentPrint(button.dataset.cancelPrint));
   document.querySelectorAll("[data-edit-queue]").forEach(button => button.onclick = () => editQueueForm(button.dataset.editQueue, button.dataset.job));
   document.querySelectorAll("[data-delete-queue]").forEach(button => button.onclick = () => deleteQueueJob(button.dataset.deleteQueue, button.dataset.job));
+  document.querySelectorAll("[data-use-saved]").forEach(button => button.onclick = () => useSavedJob(button.dataset.useSaved));
+  document.querySelectorAll("[data-edit-saved]").forEach(button => button.onclick = () => savedJobForm(button.dataset.editSaved));
+  document.querySelectorAll("[data-delete-saved]").forEach(button => button.onclick = () => deleteSavedJob(button.dataset.deleteSaved));
+  document.querySelectorAll("[data-printed-info]").forEach(button => button.onclick = () => printHistoryInfo(button.dataset.printedInfo, button.dataset.printId));
   document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = () => cancelReservation(button.dataset.cancelReservation, button.dataset.reservation));
   document.querySelectorAll("[data-move]").forEach(button => button.onclick = () => movePrinter(button.dataset.id, Number(button.dataset.move)));
   const add = $("[data-add]");
@@ -680,6 +722,18 @@ function cancelCurrentPrint(id) {
   });
 }
 
+function activePrintInfo(id) {
+  const printer = printers.find(item => item.id === id);
+  if (!printer || printer.status !== "printing") return toast("Devam eden baskı bulunamadı");
+  const progress = printProgress(printer);
+  const startedAt = printStartedAt(printer);
+  showModal(`<div class="info-sheet"><small>DEVAM EDEN BASKI</small><h2>${esc(printer.job)}</h2><p>${esc(printer.name)} · ${esc(printer.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${startedAt ? dateTime(startedAt) : "—"}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(printer.endsAt)}</b></div><div><span>İlerleme</span><b>%${progress}</b></div><div><span>Kalan süre</span><b>${remaining(printer.endsAt)}</b></div></div><div class="modal-progress"><i style="width:${progress}%"></i></div><button class="submit danger" id="calendarCancelCurrent">BASKIYI İPTAL ET</button></div>`);
+  $("#calendarCancelCurrent").onclick = () => {
+    closeModal();
+    cancelCurrentPrint(id);
+  };
+}
+
 function addForm() {
   showModal(`<form class="form"><h2>Yazıcı ekle</h2><p class="form-intro">Bir ad ve renk seçin.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Yazıcı adı<input name="name" required placeholder="Örn. Yazıcı 06"></label><label>Renk<input class="color-input" name="color" type="color" value="#2563eb"></label><button class="submit">YAZICI EKLE</button></form>`, async event => {
     event.preventDefault();
@@ -744,11 +798,74 @@ function deleteQueueJob(printerId, jobId) {
   });
 }
 
-function scheduledPrintForm(printerId, suggestedStart) {
+function savedJobForm(savedJobId = null) {
+  const job = savedJobId ? savedJobs.find(item => item.id === savedJobId) : null;
+  if (savedJobId && !job) return toast("Kayıtlı iş bulunamadı");
+  showModal(`<form class="form"><h2>${job ? "Kayıtlı işi düzenle" : "Yeni iş kaydet"}</h2><p class="form-intro">İş adını ve tahmini süresini şimdi kaydedin; daha sonra takvimde boş bir saate tıklayarak kullanın.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Parça / iş adı<input name="name" required value="${esc(job?.name || "")}" placeholder="Örn. Bağlantı braketi"></label><fieldset><legend>Tahmini baskı süresi</legend>${durationFields("duration", job?.duration || 60)}</fieldset><button class="submit">${job ? "DEĞİŞİKLİKLERİ KAYDET" : "İŞİ KAYDET"}</button></form>`, async event => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      const actor = String(form.get("actor")).trim();
+      const name = String(form.get("name")).trim();
+      const duration = readDuration(form, "duration");
+      closeModal();
+      if (job) await mutate("editSavedJob", { savedJobId: job.id, name, duration }, makeEntry("Kayıtlı iş düzenlendi", `${job.name} → ${name} · ${durationText(duration)}`, actor));
+      else await mutate("addSavedJob", { savedJob: { name, duration } }, makeEntry("Yeni iş kaydedildi", `${name} · ${durationText(duration)}`, actor));
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+}
+
+function deleteSavedJob(savedJobId) {
+  const job = savedJobs.find(item => item.id === savedJobId);
+  if (!job) return toast("Kayıtlı iş bulunamadı");
+  showModal(`<form class="form"><h2>Kayıtlı işi sil</h2><p class="form-intro"><b>“${esc(job.name)}”</b> kayıtlı işler listesinden silinsin mi? Daha önce takvime eklenmiş işler etkilenmez.</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><button class="submit danger">EVET, KAYITLI İŞİ SİL</button></form>`, async event => {
+    event.preventDefault();
+    const actor = String(new FormData(event.currentTarget).get("actor")).trim();
+    closeModal();
+    try {
+      await mutate("deleteSavedJob", { savedJobId }, makeEntry("Kayıtlı iş silindi", `${job.name} · ${durationText(job.duration)}`, actor));
+    } catch (_) {}
+  });
+}
+
+function useSavedJob(savedJobId) {
+  const job = savedJobs.find(item => item.id === savedJobId);
+  if (!job) return toast("Kayıtlı iş bulunamadı");
+  pendingSavedJobId = savedJobId;
+  setTab("calendar");
+  toast(`“${job.name}” seçildi · Takvimde boş bir saate tıklayın`);
+}
+
+function printHistoryInfo(printerId, printId) {
+  const printer = printers.find(item => item.id === printerId);
+  const item = printer?.printHistory?.find(entry => entry.id === printId);
+  if (!printer || !item) return toast("Baskı geçmişi kaydı bulunamadı");
+  const duration = Math.max(1, Math.round((Number(item.endAt) - Number(item.startAt)) / 60000));
+  showModal(`<div class="info-sheet"><small>TAMAMLANAN BASKI</small><h2>${esc(item.label || item.job)}</h2><p>${esc(printer.name)} · ${esc(item.owner || "—")}</p><div class="info-grid"><div><span>Başlangıç</span><b>${dateTime(item.startAt)}</b></div><div><span>Bitiş</span><b>${dateTime(item.endAt)}</b></div><div><span>Baskı süresi</span><b>${durationText(duration)}</b></div><div><span>Durum</span><b>✓ Tamamlandı</b></div></div><button class="submit danger" id="deletePrintedHistory">BU KAYDI SİL</button></div>`);
+  $("#deletePrintedHistory").onclick = () => deletePrintHistoryForm(printer, item);
+}
+
+function deletePrintHistoryForm(printer, item) {
+  showModal(`<form class="form"><h2>Baskı geçmişini sil</h2><p class="form-intro"><b>“${esc(item.label || item.job)}”</b> geçmişten kalıcı olarak silinsin mi? Genel işlem geçmişine silme kaydı eklenecektir.</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><button class="submit danger">EVET, GEÇMİŞTEN SİL</button></form>`, async event => {
+    event.preventDefault();
+    const actor = String(new FormData(event.currentTarget).get("actor")).trim();
+    closeModal();
+    try {
+      await mutate("deletePrintHistory", { printerId: printer.id, printId: item.id }, makeEntry("Baskı geçmişi silindi", `${item.label || item.job} · ${printer.name}`, actor));
+    } catch (_) {}
+  });
+}
+
+function scheduledPrintForm(printerId, suggestedStart, preferredSavedJob = null) {
   const printer = printers.find(item => item.id === printerId);
   if (!printer) return;
   const start = new Date(suggestedStart);
-  showModal(`<form class="form"><h2>Planlı baskı ekle</h2><p class="form-intro"><b>${esc(printer.name)}</b> için takvimden bir başlangıç zamanı seçtiniz. Çakışan bir zaman kaydedilemez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Baskı / iş adı<input name="purpose" required placeholder="Örn. Bağlantı braketi"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><fieldset><legend>Tahmini süre</legend>${durationFields("duration", 60)}</fieldset><button class="submit">BASKIYI PLANLA</button></form>`, async event => {
+  const initialJob = preferredSavedJob || savedJobs.find(item => item.id === pendingSavedJobId) || null;
+  pendingSavedJobId = null;
+  const savedSelector = savedJobs.length ? `<label>Kayıtlı iş kullan<select name="savedJob" id="scheduledSavedJob"><option value="">Elle gir</option>${savedJobs.map(job => `<option value="${job.id}" ${initialJob?.id === job.id ? "selected" : ""}>${esc(job.name)} · ${durationText(job.duration)}</option>`).join("")}</select></label>` : "";
+  showModal(`<form class="form"><h2>Planlı baskı ekle</h2><p class="form-intro"><b>${esc(printer.name)}</b> için takvimden bir başlangıç zamanı seçtiniz. Çakışan bir zaman kaydedilemez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label>${savedSelector}<label>Baskı / iş adı<input name="purpose" required value="${esc(initialJob?.name || "")}" placeholder="Örn. Bağlantı braketi"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><fieldset><legend>Tahmini süre</legend>${durationFields("duration", initialJob?.duration || 60)}</fieldset><button class="submit">BASKIYI PLANLA</button></form>`, async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
@@ -766,6 +883,15 @@ function scheduledPrintForm(printerId, suggestedStart) {
       toast(error.message);
     }
   });
+  const savedJobSelect = $("#scheduledSavedJob");
+  if (savedJobSelect) savedJobSelect.onchange = () => {
+    const selected = savedJobs.find(item => item.id === savedJobSelect.value);
+    if (!selected) return;
+    const form = savedJobSelect.closest("form");
+    form.elements.purpose.value = selected.name;
+    form.elements.durationHours.value = Math.floor(Number(selected.duration) / 60);
+    form.elements.durationMinutes.value = Number(selected.duration) % 60;
+  };
 }
 
 function reserveForm(id) {
@@ -811,6 +937,19 @@ function cancelReservation(printerId, reservationId) {
       await mutate("deleteReservation", { printerId, reservationId }, makeEntry(action, detail, actor));
     } catch (_) {}
   });
+}
+
+function scheduledPrintInfo(printerId, reservationId) {
+  const printer = printers.find(item => item.id === printerId);
+  const reservation = printer?.reservations?.find(item => item.id === reservationId && item.kind === "scheduled");
+  if (!printer || !reservation) return toast("Planlı baskı bulunamadı");
+  const duration = Math.max(1, Math.round((Number(reservation.endAt) - Number(reservation.startAt)) / 60000));
+  const untilStart = Number(reservation.startAt) > Date.now() ? remaining(reservation.startAt) : "Başlangıç zamanı geldi";
+  showModal(`<div class="info-sheet"><small>PLANLI BASKI</small><h2>${esc(reservation.purpose)}</h2><p>${esc(printer.name)} · ${esc(reservation.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${dateTime(reservation.startAt)}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(reservation.endAt)}</b></div><div><span>Baskı süresi</span><b>${durationText(duration)}</b></div><div><span>Başlangıca kalan</span><b>${esc(untilStart)}</b></div></div><button class="submit danger" id="calendarCancelScheduled">PLANLI BASKIYI İPTAL ET</button></div>`);
+  $("#calendarCancelScheduled").onclick = () => {
+    closeModal();
+    cancelReservation(printerId, reservationId);
+  };
 }
 
 function maintenanceForm(id) {
@@ -1031,7 +1170,7 @@ function setTab(next) {
   const changed = tab !== next;
   tab = next;
   document.querySelectorAll(".tabs button").forEach(button => button.classList.toggle("active", button.dataset.tab === next));
-  ["fleet", "calendar", "queue", "history"].forEach(name => $("#" + name + "View").classList.toggle("hidden", name !== next));
+  ["fleet", "calendar", "queue", "saved", "printed", "history"].forEach(name => $("#" + name + "View").classList.toggle("hidden", name !== next));
   if (next === "calendar") {
     if (changed) calendarShouldFocusNow = true;
     renderCalendar();
@@ -1040,6 +1179,7 @@ function setTab(next) {
 
 document.querySelectorAll(".tabs button").forEach(button => button.onclick = () => setTab(button.dataset.tab));
 document.querySelector("[data-open-tab]").onclick = () => setTab("history");
+$("#addSavedJob").onclick = () => savedJobForm();
 $("#reorderButton").onclick = beginOrSaveReorder;
 $("#cancelReorder").onclick = cancelReorder;
 $("#calendarDay").onclick = () => { calendarMode = "day"; calendarShouldFocusNow = true; renderCalendar(); };
