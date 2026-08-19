@@ -188,7 +188,7 @@ function plannedRows() {
       .filter(item => item.endAt > Date.now())
       .map(item => ({
         ...item,
-        type: "reservation",
+        type: item.kind === "scheduled" ? "scheduled" : "reservation",
         name: item.purpose,
         duration: Math.max(1, Math.round((item.endAt - item.startAt) / 60000)),
         printerId: printer.id,
@@ -314,14 +314,14 @@ function nextPrinterRow(printer) {
   const content = printer.status === "finished"
     ? `<b>Temizlenmeyi bekliyor</b><span>Baskı tamamlandı</span>`
     : next
-    ? `<b>${esc(next.name)}</b><span>${next.type === "reservation" ? "Rezervasyon" : "Sıradaki iş"} · ${esc(next.owner)}</span><small>${dateTime(next.startAt)} → ${timeValue(next.endAt)}</small>`
+    ? `<b>${esc(next.name)}</b><span>${next.type === "reservation" ? "Rezervasyon" : next.type === "scheduled" ? "Planlı baskı" : "Sıradaki iş"} · ${esc(next.owner)}</span><small>${dateTime(next.startAt)} → ${timeValue(next.endAt)}</small>`
     : `<b>Uygun</b><span>${esc(availabilitySummary(printer))}</span>`;
   return `<div class="next-printer-row"><i style="background:${esc(printer.color)}"></i><div class="next-printer-name"><b>${esc(printer.name)}</b></div><div class="next-printer-job">${content}</div></div>`;
 }
 
 function plannedRow(item, index) {
-  const type = item.type === "reservation" ? "Rezervasyon" : "Sıra";
-  const actions = item.type === "reservation"
+  const type = item.type === "reservation" ? "Rezervasyon" : item.type === "scheduled" ? "Planlı baskı" : "Sıra";
+  const actions = ["reservation", "scheduled"].includes(item.type)
     ? `<div class="row-actions"><button class="danger-link" data-cancel-reservation="${item.printerId}" data-reservation="${item.reservationId}">İptal et</button></div>`
     : `<div class="row-actions"><button data-edit-queue="${item.printerId}" data-job="${item.id}">Düzenle</button><button class="danger-link" data-delete-queue="${item.printerId}" data-job="${item.id}">Sil</button></div>`;
   return `<div class="queue-row"><span>${String(index + 1).padStart(2, "0")}</span><i style="background:${esc(item.color)}"></i><div><b>${esc(item.name)}</b><span>${type} · ${esc(item.owner)} · ${esc(item.printer)}</span><small>${dateTime(item.startAt)} → ${timeValue(item.endAt)}</small></div><strong>${durationText(item.duration)}</strong>${actions}</div>`;
@@ -338,7 +338,7 @@ function scheduleEvents(printer) {
     const fallbackStart = printer.status === "printing" ? Math.min(Date.now(), printer.endsAt) : printer.endsAt - 60000;
     events.push({ type: "print", label: printer.job, owner: printer.owner, startAt: recoveredStart || fallbackStart, endAt: printer.endsAt });
   }
-  printer.reservations.forEach(item => events.push({ ...item, type: "reservation", label: item.purpose, reservationId: item.id }));
+  printer.reservations.forEach(item => events.push({ ...item, type: item.kind === "scheduled" ? "scheduled" : "reservation", label: item.purpose, reservationId: item.id }));
   queueSlots(printer).forEach(item => events.push({ ...item, type: "queue", label: item.name }));
   return events.sort((a, b) => a.startAt - b.startAt);
 }
@@ -392,39 +392,50 @@ function renderCalendar() {
   renderCalendarFilters();
   const previousTimeline = $("#calendarTimeline");
   if (previousTimeline) calendarScroll = { top: previousTimeline.scrollTop, left: previousTimeline.scrollLeft };
-  const first = calendarMode === "week" ? mondayOf(calendarDate) : startOfDay(calendarDate);
-  const dayCount = calendarMode === "week" ? 7 : 1;
+  const dayCount = { day: 1, week: 7, twoWeeks: 14, threeWeeks: 21 }[calendarMode];
+  const first = calendarMode === "day" ? startOfDay(calendarDate) : addDays(startOfDay(calendarDate), -2);
   const end = addDays(first, dayCount);
   const totalHours = dayCount * 24;
-  const hourHeight = calendarMode === "week" ? 30 : 56;
+  const hourWidth = { day: 44, week: 12, twoWeeks: 8, threeWeeks: 7 }[calendarMode];
   const selected = printers.filter(printer => calendarSelectedPrinters.has(printer.id));
   $("#calendarDate").value = dateValue(calendarDate);
   $("#calendarDay").classList.toggle("active", calendarMode === "day");
   $("#calendarWeek").classList.toggle("active", calendarMode === "week");
+  $("#calendarTwoWeeks").classList.toggle("active", calendarMode === "twoWeeks");
+  $("#calendarThreeWeeks").classList.toggle("active", calendarMode === "threeWeeks");
   $("#calendarTitle").textContent = calendarMode === "day"
     ? calendarDate.toLocaleDateString("tr-TR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
-    : `${first.toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} – ${addDays(first, 6).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })}`;
-  const minWidth = 84 + selected.length * 190;
+    : `${first.toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} – ${addDays(first, dayCount - 1).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })}`;
+  const timeWidth = totalHours * hourWidth;
+  const minWidth = 150 + timeWidth;
   const rangeStart = first.getTime();
   const rangeEnd = end.getTime();
   const now = Date.now();
-  const nowTop = (now - rangeStart) / 3600000 * hourHeight;
+  const nowLeft = (now - rangeStart) / 3600000 * hourWidth;
   const nowVisible = now >= rangeStart && now < rangeEnd;
-  const dayLines = Array.from({ length: dayCount - 1 }, (_, index) => `<i class="timeline-day-divider" style="top:${(index + 1) * 24 * hourHeight}px"></i>`).join("");
-  const nowLine = nowVisible ? `<i class="timeline-now-line" style="top:${nowTop}px"><span>Şimdi</span></i>` : "";
-  const nowAxis = nowVisible ? `<i class="timeline-now-axis" style="top:${nowTop}px">${timeValue(now)}</i>` : "";
+  const dayLines = Array.from({ length: dayCount - 1 }, (_, index) => `<i class="horizontal-day-divider" style="left:${(index + 1) * 24 * hourWidth}px"></i>`).join("");
+  const nowLine = nowVisible ? `<i class="horizontal-now-line" style="left:${nowLeft}px"><span>Şimdi · ${timeValue(now)}</span></i>` : "";
 
-  $("#calendarGrid").innerHTML = selected.length ? `<div class="timeline-scroll ${calendarMode}" id="calendarTimeline"><div class="timeline-board" style="--printer-count:${selected.length};--hour-height:${hourHeight}px;--timeline-height:${totalHours * hourHeight}px;--timeline-min-width:${minWidth}px"><div class="timeline-corner">Tarih / Saat</div><div class="timeline-printer-heads">${selected.map(timelinePrinterHeader).join("")}</div><div class="timeline-axis">${timelineAxis(first, totalHours, hourHeight).join("")}${nowAxis}</div><div class="timeline-lanes">${selected.map(printer => timelineLane(printer, rangeStart, rangeEnd, hourHeight)).join("")}${dayLines}${nowLine}</div></div></div>` : empty("En az bir yazıcı seçin");
+  $("#calendarGrid").innerHTML = selected.length ? `<div class="timeline-scroll horizontal ${calendarMode}" id="calendarTimeline"><div class="horizontal-board" style="--printer-count:${selected.length};--hour-width:${hourWidth}px;--time-width:${timeWidth}px;--timeline-min-width:${minWidth}px"><div class="horizontal-corner">Yazıcı</div><div class="horizontal-time-head">${horizontalTimeScale(first, totalHours, hourWidth)}</div><div class="horizontal-printer-labels">${selected.map(horizontalPrinterLabel).join("")}</div><div class="horizontal-lanes">${selected.map(printer => horizontalLane(printer, rangeStart, rangeEnd, hourWidth)).join("")}${dayLines}${nowLine}</div></div></div>` : empty("En az bir yazıcı seçin");
 
-  document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = () => cancelReservation(button.dataset.cancelReservation, button.dataset.reservation));
+  document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = event => { event.stopPropagation(); cancelReservation(button.dataset.cancelReservation, button.dataset.reservation); });
+  document.querySelectorAll("[data-calendar-lane]").forEach(lane => lane.onclick = event => {
+    if (event.target.closest(".horizontal-event")) return;
+    const rect = lane.getBoundingClientRect();
+    const clickedHours = (event.clientX - rect.left) / hourWidth;
+    const rawStart = rangeStart + clickedHours * 3600000;
+    const startAt = Math.round(rawStart / 900000) * 900000;
+    if (startAt < Date.now() - 60000) return toast("Geçmiş bir saate baskı planlanamaz");
+    scheduledPrintForm(lane.dataset.calendarLane, startAt);
+  });
   requestAnimationFrame(() => {
     const timeline = $("#calendarTimeline");
     if (!timeline) return;
     if (calendarShouldFocusNow) {
-      const selectedOffset = (startOfDay(calendarDate).getTime() - rangeStart) / 3600000 * hourHeight;
-      const focusTop = nowVisible ? nowTop : selectedOffset + 8 * hourHeight;
-      timeline.scrollTop = Math.max(0, focusTop - timeline.clientHeight * .32);
-      timeline.scrollLeft = calendarScroll.left;
+      const selectedOffset = (startOfDay(calendarDate).getTime() - rangeStart) / 3600000 * hourWidth;
+      const focusLeft = nowVisible ? nowLeft : selectedOffset + 8 * hourWidth;
+      timeline.scrollLeft = Math.max(0, focusLeft - timeline.clientWidth * .32);
+      timeline.scrollTop = calendarScroll.top;
     } else {
       timeline.scrollTop = calendarScroll.top;
       timeline.scrollLeft = calendarScroll.left;
@@ -434,40 +445,46 @@ function renderCalendar() {
   });
 }
 
-function timelinePrinterHeader(printer) {
+function horizontalTimeScale(first, totalHours, hourWidth) {
+  const dayCount = totalHours / 24;
+  const labelEvery = calendarMode === "day" ? 1 : calendarMode === "week" ? 3 : 6;
+  const days = Array.from({ length: dayCount }, (_, index) => {
+    const date = addDays(first, index);
+    return `<div style="width:${24 * hourWidth}px">${date.toLocaleDateString("tr-TR", { weekday: "short", day: "numeric", month: "short" })}</div>`;
+  }).join("");
+  const hours = Array.from({ length: totalHours }, (_, index) => {
+    const date = new Date(first.getTime() + index * 3600000);
+    return `<div style="width:${hourWidth}px">${index % labelEvery === 0 ? `${String(date.getHours()).padStart(2, "0")}:00` : ""}</div>`;
+  }).join("");
+  return `<div class="horizontal-days">${days}</div><div class="horizontal-hours">${hours}</div>`;
+}
+
+function horizontalPrinterLabel(printer) {
   return `<div><i style="background:${esc(printer.color)}"></i><span><b>${esc(printer.name)}</b><small>${esc(availabilitySummary(printer))}</small></span></div>`;
 }
 
-function timelineAxis(first, totalHours, hourHeight) {
-  return Array.from({ length: totalHours }, (_, index) => {
-    const time = new Date(first.getTime() + index * 3600000);
-    const dayStart = time.getHours() === 0;
-    const day = dayStart ? `<b>${time.toLocaleDateString("tr-TR", { weekday: "short", day: "numeric", month: "short" })}</b>` : "";
-    return `<div class="timeline-hour ${dayStart ? "day-start" : ""}" style="height:${hourHeight}px">${day}<span>${String(time.getHours()).padStart(2, "0")}:00</span></div>`;
-  });
-}
-
-function timelineLane(printer, rangeStart, rangeEnd, hourHeight) {
+function horizontalLane(printer, rangeStart, rangeEnd, hourWidth) {
   if (printer.status === "maintenance") {
-    const height = (rangeEnd - rangeStart) / 3600000 * hourHeight;
-    return `<div class="timeline-lane"><div class="timeline-event maintenance" style="top:3px;height:${Math.max(24, height - 6)}px"><b>Servis dışı</b><span>${esc(printer.maintenanceNote || "Bakım modu")}</span></div></div>`;
+    const width = (rangeEnd - rangeStart) / 3600000 * hourWidth;
+    return `<div class="horizontal-lane" data-calendar-lane="${printer.id}"><div class="horizontal-event maintenance" style="left:3px;width:${Math.max(30, width - 6)}px"><b>Servis dışı</b><span>${esc(printer.maintenanceNote || "Bakım modu")}</span></div></div>`;
   }
   const events = scheduleEvents(printer)
     .filter(item => item.startAt < rangeEnd && item.endAt > rangeStart)
-    .map(item => timelineEvent(item, printer, rangeStart, rangeEnd, hourHeight))
+    .map(item => horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth))
     .join("");
-  return `<div class="timeline-lane">${events}</div>`;
+  return `<div class="horizontal-lane" data-calendar-lane="${printer.id}" title="Boş alana tıklayarak baskı planlayın">${events}</div>`;
 }
 
-function timelineEvent(item, printer, rangeStart, rangeEnd, hourHeight) {
+function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
   const clippedStart = Math.max(item.startAt, rangeStart);
   const clippedEnd = Math.min(item.endAt, rangeEnd);
-  const top = (clippedStart - rangeStart) / 3600000 * hourHeight;
-  const height = Math.max(22, (clippedEnd - clippedStart) / 3600000 * hourHeight);
-  const typeText = { print: "Baskı", reservation: "Rezervasyon", queue: "Sıra" }[item.type];
+  const left = (clippedStart - rangeStart) / 3600000 * hourWidth;
+  const width = Math.max(28, (clippedEnd - clippedStart) / 3600000 * hourWidth);
+  const typeText = { print: "Baskı", reservation: "Rezervasyon", scheduled: "Planlı baskı", queue: "Sıra" }[item.type];
   const fullRange = `${new Date(item.startAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} → ${new Date(item.endAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`;
   const cancel = item.type === "reservation" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Rezervasyonu iptal et">×</button>` : "";
-  return `<div class="timeline-event ${item.type} ${height < 54 ? "compact" : ""}" style="top:${top + 2}px;height:${Math.max(20, height - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}"><div><small>${typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${cancel}</div>`;
+  const scheduledCancel = item.type === "scheduled" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Planlı baskıyı iptal et">×</button>` : "";
+  return `<div class="horizontal-event ${item.type} ${width < 105 ? "compact" : ""}" style="left:${left + 2}px;width:${Math.max(24, width - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}"><div><small>${typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${cancel || scheduledCancel}</div>`;
 }
 
 function bindDynamicControls() {
@@ -641,6 +658,30 @@ function deleteQueueJob(printerId, jobId) {
   mutate("deleteQueueJob", { printerId, jobId }, makeEntry(action, detail, actor)).catch(() => {});
 }
 
+function scheduledPrintForm(printerId, suggestedStart) {
+  const printer = printers.find(item => item.id === printerId);
+  if (!printer) return;
+  const start = new Date(suggestedStart);
+  showModal(`<form class="form"><h2>Planlı baskı ekle</h2><p class="form-intro"><b>${esc(printer.name)}</b> için takvimden bir başlangıç zamanı seçtiniz. Çakışan bir zaman kaydedilemez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Baskı / iş adı<input name="purpose" required placeholder="Örn. Bağlantı braketi"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><fieldset><legend>Tahmini süre</legend>${durationFields("duration", 60)}</fieldset><button class="submit">BASKIYI PLANLA</button></form>`, async event => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      const actor = String(form.get("actor")).trim();
+      const purpose = String(form.get("purpose")).trim();
+      const duration = readDuration(form, "duration");
+      const startAt = new Date(`${form.get("date")}T${form.get("time")}`).getTime();
+      const endAt = startAt + duration * 60000;
+      closeModal();
+      await mutate("addScheduledPrint", { printerId, reservation: { purpose, owner: actor, startAt, endAt } }, makeEntry("Planlı baskı eklendi", `${purpose} · ${printer.name} · ${dateTime(startAt)}–${timeValue(endAt)}`, actor), "Baskı takvime eklendi");
+      calendarDate = startOfDay(startAt);
+      calendarShouldFocusNow = false;
+      renderCalendar();
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+}
+
 function reserveForm(id) {
   const printer = printers.find(item => item.id === id);
   const defaultStart = new Date(Date.now() + 60 * 60000);
@@ -667,11 +708,16 @@ function reserveForm(id) {
 function cancelReservation(printerId, reservationId) {
   const printer = printers.find(item => item.id === printerId);
   const reservation = printer.reservations.find(item => item.id === reservationId);
-  const actor = prompt("Rezervasyonu iptal etmek için adınızı girin:")?.trim();
-  if (!actor || !confirm(`“${reservation.purpose}” rezervasyonu iptal edilsin mi?`)) return;
+  const scheduled = reservation.kind === "scheduled";
+  const noun = scheduled ? "planlı baskıyı" : "rezervasyonu";
+  const actor = prompt(`${noun[0].toUpperCase() + noun.slice(1)} iptal etmek için adınızı girin:`)?.trim();
+  if (!actor || !confirm(`“${reservation.purpose}” ${noun} iptal edilsin mi?`)) return;
   const ownReservation = samePerson(actor, reservation.owner);
-  const action = ownReservation ? "Rezervasyon sahibi tarafından iptal edildi" : "Rezervasyon başka biri tarafından iptal edildi";
-  const detail = `${reservation.purpose} · ${printer.name} · ${dateTime(reservation.startAt)} · Rezervasyon sahibi: ${reservation.owner}`;
+  const action = scheduled
+    ? ownReservation ? "Planlı baskı sahibi tarafından iptal edildi" : "Planlı baskı başka biri tarafından iptal edildi"
+    : ownReservation ? "Rezervasyon sahibi tarafından iptal edildi" : "Rezervasyon başka biri tarafından iptal edildi";
+  const ownerLabel = scheduled ? "Baskı sahibi" : "Rezervasyon sahibi";
+  const detail = `${reservation.purpose} · ${printer.name} · ${dateTime(reservation.startAt)} · ${ownerLabel}: ${reservation.owner}`;
   mutate("deleteReservation", { printerId, reservationId }, makeEntry(action, detail, actor)).catch(() => {});
 }
 
@@ -755,8 +801,10 @@ $("#reorderButton").onclick = beginOrSaveReorder;
 $("#cancelReorder").onclick = cancelReorder;
 $("#calendarDay").onclick = () => { calendarMode = "day"; calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarWeek").onclick = () => { calendarMode = "week"; calendarShouldFocusNow = true; renderCalendar(); };
-$("#calendarPrev").onclick = () => { calendarDate = addDays(calendarDate, calendarMode === "week" ? -7 : -1); calendarShouldFocusNow = true; renderCalendar(); };
-$("#calendarNext").onclick = () => { calendarDate = addDays(calendarDate, calendarMode === "week" ? 7 : 1); calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarTwoWeeks").onclick = () => { calendarMode = "twoWeeks"; calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarThreeWeeks").onclick = () => { calendarMode = "threeWeeks"; calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarPrev").onclick = () => { calendarDate = addDays(calendarDate, -({ day: 1, week: 7, twoWeeks: 14, threeWeeks: 21 }[calendarMode])); calendarShouldFocusNow = true; renderCalendar(); };
+$("#calendarNext").onclick = () => { calendarDate = addDays(calendarDate, { day: 1, week: 7, twoWeeks: 14, threeWeeks: 21 }[calendarMode]); calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarToday").onclick = () => { calendarDate = startOfDay(new Date()); calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarDate").onchange = event => { if (event.target.value) calendarDate = startOfDay(`${event.target.value}T00:00:00`); calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarShowAll").onclick = event => {

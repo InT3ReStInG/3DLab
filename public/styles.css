@@ -126,7 +126,8 @@ button { color: inherit; }
 .calendar-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .calendar-controls > button, .segmented button, .calendar-controls input { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #536074; font-size: 10px; cursor: pointer; }
 .calendar-controls input { cursor: text; }
-.calendar-filter-bar { padding: 9px 14px; display: flex; justify-content: flex-end; border-bottom: 1px solid var(--line); background: #fbfcfd; }
+.calendar-filter-bar { padding: 9px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: #fbfcfd; }
+.calendar-filter-bar > span { color: #738093; font-size: 9px; }
 .printer-filter { position: relative; }
 .printer-filter summary { min-width: 148px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #536074; font-size: 10px; cursor: pointer; list-style: none; }
 .printer-filter summary::-webkit-details-marker { display: none; }
@@ -205,6 +206,43 @@ button { color: inherit; }
 .timeline-event.compact span { display: none; }
 .timeline-event button { width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: 50%; background: #fff9; color: var(--red); cursor: pointer; }
 
+.horizontal-board { width: var(--timeline-min-width); min-width: var(--timeline-min-width); display: grid; grid-template-columns: 150px var(--time-width); grid-template-rows: 64px calc(var(--printer-count) * 86px); }
+.horizontal-corner { position: sticky; z-index: 12; top: 0; left: 0; padding: 0 12px; display: flex; align-items: center; border-right: 1px solid #cfd6df; border-bottom: 1px solid #cfd6df; background: #eaf0f6; color: #536174; font-size: 9px; font-weight: 750; }
+.horizontal-time-head { position: sticky; z-index: 10; top: 0; width: var(--time-width); overflow: hidden; border-bottom: 1px solid #cfd6df; background: #f8fafc; }
+.horizontal-days, .horizontal-hours { width: var(--time-width); display: flex; }
+.horizontal-days { height: 31px; }
+.horizontal-days > div { flex: 0 0 auto; padding: 8px 8px 0; overflow: hidden; border-right: 2px solid #a8b3c1; color: var(--navy); font-size: 9px; font-weight: 750; text-transform: capitalize; white-space: nowrap; }
+.horizontal-hours { height: 33px; border-top: 1px solid #e2e7ed; }
+.horizontal-hours > div { flex: 0 0 auto; padding-top: 9px; overflow: visible; border-right: 1px solid #e7ebf0; color: #7b8695; font-size: 7px; white-space: nowrap; }
+.horizontal-printer-labels { position: sticky; z-index: 8; left: 0; display: grid; grid-template-rows: repeat(var(--printer-count), 86px); border-right: 1px solid #cfd6df; background: #f8fafc; }
+.horizontal-printer-labels > div { min-width: 0; padding: 12px 10px; display: flex; align-items: flex-start; gap: 8px; border-bottom: 1px solid var(--line); }
+.horizontal-printer-labels i { width: 7px; height: 30px; flex: 0 0 auto; border-radius: 4px; }
+.horizontal-printer-labels span, .horizontal-printer-labels b, .horizontal-printer-labels small { min-width: 0; display: block; }
+.horizontal-printer-labels b { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.horizontal-printer-labels small { margin-top: 5px; color: #7b8797; font-size: 7px; line-height: 1.35; }
+.horizontal-lanes { position: relative; width: var(--time-width); height: calc(var(--printer-count) * 86px); display: grid; grid-template-rows: repeat(var(--printer-count), 86px); }
+.horizontal-lane { position: relative; width: var(--time-width); height: 86px; border-bottom: 1px solid var(--line); cursor: crosshair; background: repeating-linear-gradient(to right, transparent 0, transparent calc(var(--hour-width) - 1px), #e7ebf0 calc(var(--hour-width) - 1px), #e7ebf0 var(--hour-width)); }
+.horizontal-lane:hover { background-color: #f9fbfd; }
+.horizontal-day-divider { position: absolute; z-index: 1; top: 0; bottom: 0; width: 2px; background: #a8b3c1; pointer-events: none; }
+.horizontal-now-line { position: absolute; z-index: 7; top: 0; bottom: 0; width: 2px; background: var(--red); pointer-events: none; box-shadow: 0 0 0 1px #fff8; }
+.horizontal-now-line::before { content: ""; position: absolute; top: -5px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--red); }
+.horizontal-now-line span { position: sticky; top: 68px; margin-left: 5px; padding: 2px 5px; display: block; width: max-content; border-radius: 4px; background: var(--red); color: #fff; font-size: 7px; font-style: normal; white-space: nowrap; }
+.horizontal-event { position: absolute; z-index: 4; top: 7px; height: 72px; min-width: 24px; padding: 8px 9px; overflow: hidden; display: flex; justify-content: space-between; gap: 6px; border-left: 3px solid var(--blue); border-radius: 7px; background: #dfeaff; color: #20304a; box-shadow: 0 2px 5px #1720331c; cursor: default; }
+.horizontal-event.reservation { border-color: var(--red); background: #ffe5e8; }
+.horizontal-event.scheduled { border-color: #7c3aed; background: #eee7ff; }
+.horizontal-event.queue { border-color: #7b8798; background: #e9edf2; }
+.horizontal-event.maintenance { border-color: var(--amber); background: repeating-linear-gradient(135deg, #fff4d6, #fff4d6 9px, #ffedbd 9px, #ffedbd 18px); }
+.horizontal-event > div { min-width: 0; }
+.horizontal-event small, .horizontal-event b, .horizontal-event span { display: block; }
+.horizontal-event small { overflow: hidden; color: #647084; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.horizontal-event b { margin-top: 6px; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.horizontal-event span { margin-top: 3px; overflow: hidden; color: #5f6c7d; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.horizontal-event.compact { padding: 5px; }
+.horizontal-event.compact small { font-size: 6px; }
+.horizontal-event.compact b { margin-top: 4px; font-size: 8px; }
+.horizontal-event.compact span { display: none; }
+.horizontal-event button { width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: 50%; background: #fff9; color: var(--red); cursor: pointer; }
+
 .modal-backdrop { position: fixed; z-index: 20; inset: 0; padding: 18px; display: grid; place-items: center; background: #11182766; backdrop-filter: blur(3px); }
 .modal-card { position: relative; width: min(440px, 100%); max-height: 92vh; overflow: auto; padding: 30px; border-radius: 14px; background: #fff; box-shadow: 0 20px 60px #11182733; }
 .modal-close { position: absolute; right: 14px; top: 10px; border: 0; background: transparent; color: #7b8492; font-size: 27px; cursor: pointer; }
@@ -248,7 +286,7 @@ footer { padding: 24px 2px 30px; display: flex; justify-content: space-between; 
   .queue-row .row-actions { grid-column: 3 / -1; }
   .next-printer-row { grid-template-columns: 5px 82px minmax(0, 1fr); padding: 11px 12px; }
   .calendar-controls input { flex: 1 1 130px; }
-  .calendar-filter-bar { justify-content: stretch; }
+  .calendar-filter-bar { align-items: stretch; flex-direction: column; }
   .printer-filter { width: 100%; }
   .printer-filter summary { width: 100%; }
   .printer-filter-menu { right: auto; left: 0; width: 100%; }
@@ -257,6 +295,9 @@ footer { padding: 24px 2px 30px; display: flex; justify-content: space-between; 
   .timeline-printer-heads, .timeline-lanes { grid-template-columns: repeat(var(--printer-count), minmax(164px, 1fr)); }
   .timeline-corner { padding: 0 7px; }
   .timeline-hour { padding-right: 6px; }
+  .horizontal-board { grid-template-columns: 132px var(--time-width); }
+  .horizontal-corner { padding: 0 9px; }
+  .horizontal-printer-labels > div { padding: 10px 8px; }
   .calendar-printer { grid-template-columns: 1fr; gap: 8px; }
   .modal-card { padding: 25px 20px; }
   .form-grid { grid-template-columns: 1fr; }
