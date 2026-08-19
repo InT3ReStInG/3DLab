@@ -276,6 +276,20 @@ function availabilitySummary(printer) {
   return `${startText} · ${durationText(Math.max(1, Math.floor(availableFor / 60000)))} uygun`;
 }
 
+function approachingPlan(printer) {
+  const now = Date.now();
+  return [...printer.reservations]
+    .filter(item => item.startAt > now && item.startAt - now <= 60 * 60000)
+    .sort((a, b) => a.startAt - b.startAt)[0] || null;
+}
+
+function approachingPlanText(printer) {
+  const plan = approachingPlan(printer);
+  if (!plan) return "";
+  const type = plan.kind === "scheduled" ? "Planlı baskı" : "Rezervasyon";
+  return `${type} ${remaining(plan.startAt)} sonra: ${plan.purpose}`;
+}
+
 function render() {
   printers = printers.map(printer => printer.status === "printing" && printer.endsAt <= Date.now()
     ? { ...printer, status: "finished" }
@@ -316,17 +330,19 @@ function card(printer, index) {
     ? `<em class="state-symbol">⚙</em>`
     : `<em class="state-symbol">▣</em>`;
   const queueNote = printer.queue.length ? `<span class="queue-note">${printer.queue.length} iş sırada</span>` : "";
+  const warningText = printer.status === "maintenance" ? "" : approachingPlanText(printer);
+  const planWarning = warningText ? `<span class="upcoming-warning">⚠ ${esc(warningText)}</span>` : "";
   const availability = `<span class="availability-line">${esc(availabilitySummary(printer))}</span>`;
   let body;
   if (printer.status === "free") {
     body = printer.queue.length
-      ? `<p>${esc(printer.queue[0].name)}</p><span class="primary-action">▶ SIRADAKİ İŞİ BAŞLAT</span>${queueNote}${availability}`
-      : `<p>Yeni bir iş için hazır</p><span class="primary-action">＋ BASKI EKLE</span>${availability}`;
+      ? `<p>${esc(printer.queue[0].name)}</p><span class="primary-action">▶ SIRADAKİ İŞİ BAŞLAT</span>${queueNote}${planWarning}${availability}`
+      : `<p>Yeni bir iş için hazır</p><span class="primary-action">＋ BASKI EKLE</span>${planWarning}${availability}`;
   } else if (printer.status === "maintenance") {
     body = `<p>${esc(printer.maintenanceNote)}</p><span class="maintenance-action">SERVİS DIŞI</span>${availability}`;
   } else {
     const progress = printProgress(printer);
-    body = `<p class="job">${esc(printer.job)}</p><span class="owner">◯ ${esc(printer.owner)}</span><div class="progress"><i style="width:${progress}%"></i></div><div class="time-row"><span>İlerleme</span><b>%${progress}</b></div><div class="time-row"><span>${printer.status === "finished" ? "Temizlenmeyi bekliyor" : "Tahmini kalan süre"}</span><b>${remaining(printer.endsAt)}</b></div>${queueNote}${availability}`;
+    body = `<p class="job">${esc(printer.job)}</p><span class="owner">◯ ${esc(printer.owner)}</span><div class="progress"><i style="width:${progress}%"></i></div><div class="time-row"><span>İlerleme</span><b>%${progress}</b></div><div class="time-row"><span>${printer.status === "finished" ? "Temizlenmeyi bekliyor" : "Tahmini kalan süre"}</span><b>${remaining(printer.endsAt)}</b></div>${queueNote}${planWarning}${availability}`;
   }
 
   const reorderControls = reorderMode ? `
@@ -451,7 +467,12 @@ function renderCalendar() {
   const nowLeft = (now - rangeStart) / 3600000 * hourWidth;
   const nowVisible = now >= rangeStart && now < rangeEnd;
   const dayLines = Array.from({ length: dayCount - 1 }, (_, index) => `<i class="horizontal-day-divider" style="left:${(index + 1) * 24 * hourWidth}px"></i>`).join("");
-  const nowLine = nowVisible ? `<i class="horizontal-now-line" style="left:${nowLeft}px"><span>Şimdi · ${timeValue(now)}</span></i>` : "";
+  const progressMarkers = nowVisible ? selected.map((printer, index) => {
+    if (printer.status !== "printing" || !printer.endsAt || printer.endsAt <= now) return "";
+    const progress = printProgress(printer);
+    return `<b class="horizontal-now-progress" style="top:${index * 86 + 43}px" title="${esc(printer.name)} · %${progress} tamamlandı">%${progress}</b>`;
+  }).join("") : "";
+  const nowLine = nowVisible ? `<i class="horizontal-now-line" style="left:${nowLeft}px"><span>Şimdi · ${timeValue(now)}</span>${progressMarkers}</i>` : "";
 
   $("#calendarGrid").innerHTML = selected.length ? `<div class="timeline-scroll horizontal ${calendarMode}" id="calendarTimeline"><div class="horizontal-board" style="--printer-count:${selected.length};--hour-width:${hourWidth}px;--time-width:${timeWidth}px;--timeline-min-width:${minWidth}px"><div class="horizontal-corner">Yazıcı</div><div class="horizontal-time-head">${horizontalTimeScale(first, totalHours, hourWidth)}</div><div class="horizontal-printer-labels">${selected.map(horizontalPrinterLabel).join("")}</div><div class="horizontal-lanes">${selected.map(printer => horizontalLane(printer, rangeStart, rangeEnd, hourWidth)).join("")}${dayLines}${nowLine}</div></div></div>` : empty("En az bir yazıcı seçin");
 
@@ -519,9 +540,11 @@ function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
   const width = Math.max(28, (clippedEnd - clippedStart) / 3600000 * hourWidth);
   const typeText = { print: "Baskı", reservation: "Rezervasyon", scheduled: "Planlı baskı", queue: "Sıra" }[item.type];
   const fullRange = `${new Date(item.startAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} → ${new Date(item.endAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`;
+  const completed = item.endAt <= Date.now() && ["print", "scheduled"].includes(item.type);
+  const upcoming = item.startAt > Date.now() && item.startAt - Date.now() <= 60 * 60000 && ["reservation", "scheduled"].includes(item.type);
   const cancel = item.type === "reservation" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Rezervasyonu iptal et">×</button>` : "";
   const scheduledCancel = item.type === "scheduled" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Planlı baskıyı iptal et">×</button>` : "";
-  return `<div class="horizontal-event ${item.type} ${width < 105 ? "compact" : ""}" style="left:${left + 2}px;width:${Math.max(24, width - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}"><div><small>${typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${cancel || scheduledCancel}</div>`;
+  return `<div class="horizontal-event ${item.type} ${completed ? "completed" : ""} ${upcoming ? "upcoming" : ""} ${width < 105 ? "compact" : ""}" style="left:${left + 2}px;width:${Math.max(24, width - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}${completed ? " · Tamamlandı" : upcoming ? " · Bir saatten az kaldı" : ""}"><div><small>${completed ? "✓ Tamamlandı" : upcoming ? `⚠ ${remaining(item.startAt)} kaldı` : typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${completed ? "" : cancel || scheduledCancel}</div>`;
 }
 
 function bindDynamicControls() {
@@ -594,7 +617,9 @@ function openPrinter(id) {
 
 function jobForm(printer) {
   const queued = printer.status !== "free" || printer.queue.length > 0;
-  showModal(`<form class="form"><h2>${esc(printer.name)}</h2><p class="form-intro">${queued ? "Yazıcı uygun olduğunda ve rezervasyonlara göre işiniz sıraya yerleştirilecektir." : "Baskıyı başlatmadan önce işi kaydedin."}</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Ne basıyorsunuz?<input name="job" required placeholder="Örn. İHA sensör braketi"></label><fieldset><legend>Tahmini baskı süresi</legend>${durationFields("duration", 60)}</fieldset><button class="submit">${queued ? "SIRAYA EKLE" : "BASKIYI BAŞLAT"}</button></form>`, async event => {
+  const warningText = approachingPlanText(printer);
+  const warning = warningText ? `<div class="form-warning"><b>⚠ Yaklaşan plan</b><span>${esc(warningText)}. Girdiğiniz süre bununla çakışırsa baskı başlatılmaz.</span></div>` : "";
+  showModal(`<form class="form"><h2>${esc(printer.name)}</h2><p class="form-intro">${queued ? "Yazıcı uygun olduğunda ve rezervasyonlara göre işiniz sıraya yerleştirilecektir." : "Baskıyı başlatmadan önce işi kaydedin."}</p>${warning}<label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Ne basıyorsunuz?<input name="job" required placeholder="Örn. İHA sensör braketi"></label><fieldset><legend>Tahmini baskı süresi</legend>${durationFields("duration", 60)}</fieldset><button class="submit">${queued ? "SIRAYA EKLE" : "BASKIYI BAŞLAT"}</button></form>`, async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
