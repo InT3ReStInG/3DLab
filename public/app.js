@@ -865,17 +865,18 @@ function scheduledPrintForm(printerId, suggestedStart, preferredSavedJob = null)
   const initialJob = preferredSavedJob || savedJobs.find(item => item.id === pendingSavedJobId) || null;
   pendingSavedJobId = null;
   const savedSelector = savedJobs.length ? `<label>Kayıtlı iş kullan<select name="savedJob" id="scheduledSavedJob"><option value="">Elle gir</option>${savedJobs.map(job => `<option value="${job.id}" ${initialJob?.id === job.id ? "selected" : ""}>${esc(job.name)} · ${durationText(job.duration)}</option>`).join("")}</select></label>` : "";
-  showModal(`<form class="form"><h2>Planlı baskı ekle</h2><p class="form-intro"><b>${esc(printer.name)}</b> için takvimden bir başlangıç zamanı seçtiniz. Çakışan bir zaman kaydedilemez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label>${savedSelector}<label>Baskı / iş adı<input name="purpose" required value="${esc(initialJob?.name || "")}" placeholder="Örn. Bağlantı braketi"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><fieldset><legend>Tahmini süre</legend>${durationFields("duration", initialJob?.duration || 60)}</fieldset><button class="submit">BASKIYI PLANLA</button></form>`, async event => {
+  showModal(`<form class="form"><h2>Planlı baskı ekle</h2><p class="form-intro"><b>${esc(printer.name)}</b> için takvimden bir başlangıç zamanı seçtiniz. Çakışan bir zaman kaydedilemez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label>${savedSelector}<label>Baskı / iş adı<input name="purpose" required value="${esc(initialJob?.name || "")}" placeholder="Örn. Bağlantı braketi"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><fieldset id="scheduledDuration" class="${initialJob ? "duration-locked" : ""}"><legend>Tahmini süre <span>${initialJob ? "· Kayıtlı iş süresi" : ""}</span></legend>${durationFields("duration", initialJob?.duration || 60)}</fieldset><button class="submit">BASKIYI PLANLA</button></form>`, async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
       const actor = String(form.get("actor")).trim();
       const purpose = String(form.get("purpose")).trim();
-      const duration = readDuration(form, "duration");
+      const selectedJob = savedJobs.find(item => item.id === String(form.get("savedJob") || ""));
+      const duration = selectedJob ? Math.max(1, Number(selectedJob.duration) || 1) : readDuration(form, "duration");
       const startAt = new Date(`${form.get("date")}T${form.get("time")}`).getTime();
       const endAt = startAt + duration * 60000;
       closeModal();
-      await mutate("addScheduledPrint", { printerId, reservation: { purpose, owner: actor, startAt, endAt } }, makeEntry("Planlı baskı eklendi", `${purpose} · ${printer.name} · ${dateTime(startAt)}–${timeValue(endAt)}`, actor), "Baskı takvime eklendi");
+      await mutate("addScheduledPrint", { printerId, savedJobId: selectedJob?.id || null, reservation: { purpose, owner: actor, startAt, endAt } }, makeEntry("Planlı baskı eklendi", `${purpose} · ${printer.name} · ${dateTime(startAt)}–${timeValue(endAt)}`, actor), "Baskı takvime eklendi");
       calendarDate = startOfDay(startAt);
       calendarShouldFocusNow = false;
       renderCalendar();
@@ -884,10 +885,20 @@ function scheduledPrintForm(printerId, suggestedStart, preferredSavedJob = null)
     }
   });
   const savedJobSelect = $("#scheduledSavedJob");
+  const durationFieldset = $("#scheduledDuration");
+  const setDurationLock = selected => {
+    if (!durationFieldset) return;
+    durationFieldset.classList.toggle("duration-locked", Boolean(selected));
+    durationFieldset.querySelectorAll("input").forEach(input => { input.readOnly = Boolean(selected); });
+    const legendNote = durationFieldset.querySelector("legend span");
+    if (legendNote) legendNote.textContent = selected ? "· Kayıtlı iş süresi" : "";
+  };
+  setDurationLock(initialJob);
   if (savedJobSelect) savedJobSelect.onchange = () => {
     const selected = savedJobs.find(item => item.id === savedJobSelect.value);
-    if (!selected) return;
     const form = savedJobSelect.closest("form");
+    setDurationLock(selected);
+    if (!selected) return;
     form.elements.purpose.value = selected.name;
     form.elements.durationHours.value = Math.floor(Number(selected.duration) / 60);
     form.elements.durationMinutes.value = Number(selected.duration) % 60;

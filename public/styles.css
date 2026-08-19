@@ -335,6 +335,9 @@ button { color: inherit; }
 .form-grid, .duration-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .form fieldset { margin: 0; padding: 0; border: 0; }
 .form legend { margin-bottom: 7px; color: #4b5565; font-size: 10px; font-weight: 650; }
+.form legend span { color: #8490a1; font-size: 9px; font-weight: 550; }
+.form fieldset.duration-locked .duration-grid { padding: 8px; border: 1px solid #dfe4ea; border-radius: 9px; background: #f2f4f7; }
+.form fieldset.duration-locked input { border-color: #dfe4ea; background: #e8ebef; color: #687386; cursor: not-allowed; box-shadow: none; }
 .color-input { padding: 5px !important; }
 .submit { height: 43px; border: 0; border-radius: 8px; background: var(--blue); color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
 .submit.danger { background: var(--red); }
