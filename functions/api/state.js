@@ -343,12 +343,17 @@ function applyAction(state, body) {
 
   if (action === "addReservation" || action === "addScheduledPrint") {
     if (["maintenance", "broken"].includes(printer.status)) throw new Error(printer.status === "broken" ? "Arızalı yazıcı rezerve edilemez" : "Bakımdaki yazıcı rezerve edilemez");
+    const savedJob = action === "addScheduledPrint" && body.savedJobId
+      ? state.savedJobs.find(item => item.id === body.savedJobId)
+      : null;
+    if (body.savedJobId && !savedJob) throw new Error("Kayıtlı iş bulunamadı");
+    const startAt = Number(body.reservation?.startAt);
     const reservation = {
       id: crypto.randomUUID(),
       purpose: requireText(body.reservation?.purpose, "Amaç"),
       owner: requireText(body.reservation?.owner, "Ad"),
-      startAt: Number(body.reservation?.startAt),
-      endAt: Number(body.reservation?.endAt),
+      startAt,
+      endAt: savedJob ? startAt + minutes(savedJob.duration) * 60000 : Number(body.reservation?.endAt),
       kind: action === "addScheduledPrint" ? "scheduled" : "reservation",
     };
     if (!Number.isFinite(reservation.startAt) || !Number.isFinite(reservation.endAt) || reservation.endAt <= reservation.startAt) throw new Error("Rezervasyon zamanı geçersiz");
