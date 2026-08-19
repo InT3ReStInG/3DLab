@@ -156,14 +156,14 @@ function toast(message) {
   toast.timer = setTimeout(() => element.classList.add("hidden"), 3000);
 }
 
-async function load() {
+async function load(silent = false) {
   try {
     const data = await api();
     printers = (data.printers || []).map(normalizePrinter);
     activity = data.activity || [];
     render();
   } catch (error) {
-    toast(error.message);
+    if (!silent) toast(error.message);
   }
 }
 
@@ -172,6 +172,7 @@ function normalizePrinter(printer) {
     ...printer,
     queue: Array.isArray(printer.queue) ? printer.queue : [],
     reservations: Array.isArray(printer.reservations) ? printer.reservations : [],
+    printHistory: Array.isArray(printer.printHistory) ? printer.printHistory : [],
   };
 }
 
@@ -387,6 +388,7 @@ function empty(text) {
 
 function scheduleEvents(printer) {
   const events = [];
+  printer.printHistory.forEach(item => events.push({ ...item, type: "print", label: item.label || item.job }));
   if (["printing", "finished"].includes(printer.status) && printer.endsAt) {
     const recoveredStart = printStartedAt(printer);
     const fallbackStart = printer.status === "printing" ? Math.min(Date.now(), printer.endsAt) : printer.endsAt - 60000;
@@ -909,5 +911,5 @@ $("#closeModal").onclick = closeModal;
 $("#modal").onclick = event => { if (event.target === $("#modal")) closeModal(); };
 updateHeaderClock();
 setInterval(updateHeaderClock, 1000);
-setInterval(render, 30000);
+setInterval(() => load(true), 30000);
 load();
