@@ -54,7 +54,10 @@ function busyConflict(printer, startAt, endAt, options = {}) {
 }
 
 async function ensureTable(db) {
-  await db.prepare("CREATE TABLE IF NOT EXISTS lab_state (id INTEGER PRIMARY KEY, printers TEXT NOT NULL, activity TEXT NOT NULL, updated_at INTEGER NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS lab_state (id INTEGER PRIMARY KEY, printers TEXT NOT NULL, activity TEXT NOT NULL, saved_jobs TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL)").run();
+  try {
+    await db.prepare("ALTER TABLE lab_state ADD COLUMN saved_jobs TEXT NOT NULL DEFAULT '[]'").run();
+  } catch (_) {}
   const found = await db.prepare("SELECT id FROM lab_state WHERE id=1").first();
   if (found) return;
 
@@ -71,16 +74,17 @@ async function ensureTable(db) {
     { id: "a2", action: "Baskı tamamlandı", detail: "Kanat nervürü test parçası · Yazıcı 03", user: "Mert Kaya", at: now - 4920000 },
     { id: "a3", action: "Bakım modu açıldı", detail: "Nozul değişimi · Yazıcı 04", user: "Laboratuvar Sorumlusu", at: now - 11520000 },
   ];
-  await db.prepare("INSERT INTO lab_state (id,printers,activity,updated_at) VALUES (1,?,?,?)")
-    .bind(JSON.stringify(printers), JSON.stringify(activity), now).run();
+  await db.prepare("INSERT INTO lab_state (id,printers,activity,saved_jobs,updated_at) VALUES (1,?,?,?,?)")
+    .bind(JSON.stringify(printers), JSON.stringify(activity), "[]", now).run();
 }
 
 async function readState(db) {
   await ensureTable(db);
-  const row = await db.prepare("SELECT printers,activity FROM lab_state WHERE id=1").first();
+  const row = await db.prepare("SELECT printers,activity,saved_jobs FROM lab_state WHERE id=1").first();
   const state = {
     printers: JSON.parse(row.printers).map(normalizePrinter),
     activity: JSON.parse(row.activity),
+    savedJobs: JSON.parse(row.saved_jobs || "[]"),
   };
   let changed = false;
   state.printers = state.printers.map(printer => {
@@ -152,8 +156,8 @@ async function readState(db) {
 }
 
 async function writeState(db, state) {
-  await db.prepare("UPDATE lab_state SET printers=?,activity=?,updated_at=? WHERE id=1")
-    .bind(JSON.stringify(state.printers), JSON.stringify(state.activity.slice(0, 500)), Date.now()).run();
+  await db.prepare("UPDATE lab_state SET printers=?,activity=?,saved_jobs=?,updated_at=? WHERE id=1")
+    .bind(JSON.stringify(state.printers), JSON.stringify(state.activity.slice(0, 500)), JSON.stringify(state.savedJobs || []), Date.now()).run();
 }
 
 function findPrinter(state, id) {
@@ -173,6 +177,35 @@ function requireText(value, label) {
 function applyAction(state, body) {
   const action = body.action;
   const printer = body.printerId ? findPrinter(state, body.printerId) : null;
+
+  if (action === "addSavedJob") {
+    state.savedJobs.unshift({
+      id: crypto.randomUUID(),
+      name: requireText(body.savedJob?.name, "İş adı"),
+      duration: minutes(body.savedJob?.duration),
+      createdBy: requireText(body.entry?.user, "Ad"),
+      createdAt: Date.now(),
+    });
+    return;
+  }
+
+  if (action === "editSavedJob") {
+    const existing = state.savedJobs.find(item => item.id === body.savedJobId);
+    if (!existing) throw new Error("Kayıtlı iş bulunamadı");
+    state.savedJobs = state.savedJobs.map(item => item.id === body.savedJobId ? {
+      ...item,
+      name: requireText(body.name, "İş adı"),
+      duration: minutes(body.duration),
+      updatedAt: Date.now(),
+    } : item);
+    return;
+  }
+
+  if (action === "deleteSavedJob") {
+    if (!state.savedJobs.some(item => item.id === body.savedJobId)) throw new Error("Kayıtlı iş bulunamadı");
+    state.savedJobs = state.savedJobs.filter(item => item.id !== body.savedJobId);
+    return;
+  }
 
   if (action === "addPrinter") {
     const next = normalizePrinter(body.printer || {});
@@ -195,6 +228,12 @@ function applyAction(state, body) {
   }
 
   if (!printer) throw new Error("Yazıcı bulunamadı");
+
+  if (action === "deletePrintHistory") {
+    if (!printer.printHistory.some(item => item.id === body.printId)) throw new Error("Baskı geçmişi kaydı bulunamadı");
+    replacePrinter(state, { ...printer, printHistory: printer.printHistory.filter(item => item.id !== body.printId) });
+    return;
+  }
 
   if (action === "startJob") {
     if (["maintenance", "broken"].includes(printer.status)) throw new Error(printer.status === "broken" ? "Arızalı yazıcıya iş eklenemez" : "Bakımdaki yazıcıya iş eklenemez");
