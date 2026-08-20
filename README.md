@@ -17,12 +17,15 @@ GitHub deponuzun ana dizinindeki yapı tam olarak şöyle olmalıdır:
 printers-lab-750/
 ├── functions/
 │   └── api/
+│       ├── auth.js
 │       └── state.js
 ├── public/
 │   ├── _routes.json
 │   ├── app.js
 │   ├── index.html
 │   └── styles.css
+├── worker.js
+├── wrangler.toml
 └── README.md
 ```
 
@@ -76,8 +79,17 @@ Cloudflare'ın verdiği `pages.dev` adresini açın. Yazıcı listesi gelmelidir
 
 GitHub'daki dosyaları düzenleyin veya değiştirin. `main` dalına gönderilen her commit Cloudflare Pages tarafından otomatik olarak yayınlanır.
 
-## Gizlilik uyarısı
+## Kayıt olan bir kullanıcıya değişiklik yetkisi verme
 
-Bu sürümde özellikle giriş sistemi bulunmaz. Site adresini bilen herkes sayfayı görebilir, herhangi bir ad girebilir ve yazıcı verilerini değiştirebilir. Adresi yalnızca laboratuvar içinde paylaşın ve işlem geçmişini doğrulanmış kimlik kaydı olarak değerlendirmeyin.
+Yeni hesaplar siteyi görüntüleyebilir fakat varsayılan olarak değişiklik yapamaz. Yetki vermek için:
 
-İleride gerçek erişim kısıtlaması isterseniz sitenin önüne Cloudflare Access ekleyebilirsiniz. Bu durumda bir kimlik doğrulama adımı gerekir.
+1. Cloudflare kontrol panelinde **Storage & Databases → D1 → pd750-gewh43 → Console** bölümünü açın.
+2. Aşağıdaki komutta kullanıcı adını kayıt sırasında yazılan adla değiştirip çalıştırın:
+
+```sql
+UPDATE users SET can_edit = 1 WHERE name = 'Ali Mammedzada';
+```
+
+Yetkiyi kaldırmak için aynı komutta `can_edit = 0` kullanın. Kullanıcı sayfayı yenilediğinde yeni yetki durumu görünür.
+
+Şifreler PBKDF2-SHA256 ile salt kullanılarak saklanır. Oturum belirteçleri yalnızca hash olarak D1 veritabanında tutulur ve tarayıcıya `HttpOnly`, `Secure`, `SameSite=Lax` çereziyle gönderilir.

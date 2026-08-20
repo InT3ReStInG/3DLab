@@ -1,4 +1,4 @@
-import { onRequestGet, onRequestPost } from "./functions/api/state.js"; 
+import { onAuthRequest, onRequestGet, onRequestPost } from "./functions/api/state.js";
 
 export default {
   async fetch(request, env) {
@@ -17,6 +17,10 @@ export default {
         status: 405,
         headers: { Allow: "GET, POST" },
       });
+    }
+
+    if (url.pathname === "/api/auth") {
+      return onAuthRequest({ request, env });
     }
 
     return env.ASSETS.fetch(request);
