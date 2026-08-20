@@ -395,8 +395,8 @@ function nextPrinterRow(printer) {
 function plannedRow(item, index) {
   const type = item.type === "reservation" ? "Rezervasyon" : item.type === "scheduled" ? "Planlı baskı" : "Sıra";
   const actions = ["reservation", "scheduled"].includes(item.type)
-    ? `<div class="row-actions"><button class="danger-link" data-cancel-reservation="${item.printerId}" data-reservation="${item.reservationId}">İptal et</button></div>`
-    : `<div class="row-actions"><button data-edit-queue="${item.printerId}" data-job="${item.id}">Düzenle</button><button class="danger-link" data-delete-queue="${item.printerId}" data-job="${item.id}">Sil</button></div>`;
+    ? `<div class="row-actions"><button data-edit-planned="${item.printerId}" data-reservation="${item.reservationId}">✎ Düzenle</button><button class="danger-link" data-cancel-reservation="${item.printerId}" data-reservation="${item.reservationId}">İptal et</button></div>`
+    : `<div class="row-actions"><button data-edit-queue="${item.printerId}" data-job="${item.id}">✎ Düzenle</button><button class="danger-link" data-delete-queue="${item.printerId}" data-job="${item.id}">Sil</button></div>`;
   return `<div class="queue-row"><span>${String(index + 1).padStart(2, "0")}</span><i style="background:${esc(item.color)}"></i><div><b>${esc(item.name)}</b><span>${type} · ${esc(item.owner)} · ${esc(item.printer)}</span><small>${dateTime(item.startAt)} → ${timeValue(item.endAt)}</small></div><strong>${durationText(item.duration)}</strong>${actions}</div>`;
 }
 
@@ -603,6 +603,7 @@ function bindDynamicControls() {
   document.querySelectorAll("[data-edit-printer]").forEach(button => button.onclick = () => editPrinterForm(button.dataset.editPrinter));
   document.querySelectorAll("[data-maintenance]").forEach(button => button.onclick = () => maintenanceForm(button.dataset.maintenance));
   document.querySelectorAll("[data-cancel-print]").forEach(button => button.onclick = () => cancelCurrentPrint(button.dataset.cancelPrint));
+  document.querySelectorAll("[data-edit-planned]").forEach(button => button.onclick = () => editPlannedForm(button.dataset.editPlanned, button.dataset.reservation));
   document.querySelectorAll("[data-edit-queue]").forEach(button => button.onclick = () => editQueueForm(button.dataset.editQueue, button.dataset.job));
   document.querySelectorAll("[data-delete-queue]").forEach(button => button.onclick = () => deleteQueueJob(button.dataset.deleteQueue, button.dataset.job));
   document.querySelectorAll("[data-use-saved]").forEach(button => button.onclick = () => useSavedJob(button.dataset.useSaved));
@@ -952,16 +953,43 @@ function cancelReservation(printerId, reservationId) {
   });
 }
 
+function editPlannedForm(printerId, reservationId) {
+  const printer = printers.find(item => item.id === printerId);
+  const reservation = printer?.reservations?.find(item => item.id === reservationId);
+  if (!printer || !reservation) return toast("Planlanan iş bulunamadı");
+  const scheduled = reservation.kind === "scheduled";
+  const start = new Date(reservation.startAt);
+  const duration = Math.max(1, Math.round((Number(reservation.endAt) - Number(reservation.startAt)) / 60000));
+  showModal(`<form class="form"><h2>${scheduled ? "Planlı baskıyı" : "Rezervasyonu"} düzenle</h2><p class="form-intro"><b>${esc(printer.name)}</b> · Süre ${durationText(duration)} olarak korunacaktır.</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>${scheduled ? "Baskı / iş adı" : "Amaç / iş adı"}<input name="purpose" required value="${esc(reservation.purpose)}"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><button class="submit">DEĞİŞİKLİKLERİ KAYDET</button></form>`, async event => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      const actor = String(form.get("actor")).trim();
+      const purpose = String(form.get("purpose")).trim();
+      const startAt = new Date(`${form.get("date")}T${form.get("time")}`).getTime();
+      const endAt = startAt + duration * 60000;
+      closeModal();
+      await mutate("editReservation", { printerId, reservationId, purpose, startAt, endAt }, makeEntry(scheduled ? "Planlı baskı düzenlendi" : "Rezervasyon düzenlendi", `${reservation.purpose} → ${purpose} · ${printer.name} · ${dateTime(startAt)}`, actor), "Planlanan iş güncellendi");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+}
+
 function scheduledPrintInfo(printerId, reservationId) {
   const printer = printers.find(item => item.id === printerId);
   const reservation = printer?.reservations?.find(item => item.id === reservationId && item.kind === "scheduled");
   if (!printer || !reservation) return toast("Planlı baskı bulunamadı");
   const duration = Math.max(1, Math.round((Number(reservation.endAt) - Number(reservation.startAt)) / 60000));
   const untilStart = Number(reservation.startAt) > Date.now() ? remaining(reservation.startAt) : "Başlangıç zamanı geldi";
-  showModal(`<div class="info-sheet"><small>PLANLI BASKI</small><input class="inline-title-input" id="scheduledPrintName" value="${esc(reservation.purpose)}" aria-label="Planlı baskı adını düzenle"><small class="inline-edit-hint">Adı değiştirip Enter'a basın veya dışarı dokunun</small><p>${esc(printer.name)} · ${esc(reservation.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${dateTime(reservation.startAt)}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(reservation.endAt)}</b></div><div><span>Baskı süresi</span><b>${durationText(duration)}</b></div><div><span>Başlangıca kalan</span><b>${esc(untilStart)}</b></div></div><button class="submit danger" id="calendarCancelScheduled">PLANLI BASKIYI İPTAL ET</button></div>`);
+  showModal(`<div class="info-sheet"><small>PLANLI BASKI</small><input class="inline-title-input" id="scheduledPrintName" value="${esc(reservation.purpose)}" aria-label="Planlı baskı adını düzenle"><small class="inline-edit-hint">Adı değiştirip Enter'a basın veya dışarı dokunun</small><p>${esc(printer.name)} · ${esc(reservation.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${dateTime(reservation.startAt)}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(reservation.endAt)}</b></div><div><span>Baskı süresi</span><b>${durationText(duration)}</b></div><div><span>Başlangıca kalan</span><b>${esc(untilStart)}</b></div></div><div class="info-actions"><button class="submit" id="calendarEditScheduled">✎ DÜZENLE</button><button class="submit danger" id="calendarCancelScheduled">İPTAL ET</button></div></div>`);
   bindInlinePrintName($("#scheduledPrintName"), reservation.purpose, async name => {
     await mutate("editScheduledPrintName", { printerId, reservationId, name }, makeEntry("Planlı baskının adı değiştirildi", `${reservation.purpose} → ${name} · ${printer.name}`, rememberedActor || "Oturum kullanıcısı"), "Planlı baskı adı güncellendi");
   });
+  $("#calendarEditScheduled").onclick = () => {
+    closeModal();
+    editPlannedForm(printerId, reservationId);
+  };
   $("#calendarCancelScheduled").onclick = () => {
     closeModal();
     cancelReservation(printerId, reservationId);
