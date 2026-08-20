@@ -220,7 +220,8 @@ function renderAuth() {
 function bindPasswordToggles() {
   document.querySelectorAll("[data-password-toggle]").forEach(button => {
     const input = button.parentElement.querySelector("input");
-    const supportsTextMask = Boolean(window.CSS?.supports?.("-webkit-text-security", "disc"));
+    const touchDevice = window.matchMedia?.("(hover: none) and (pointer: coarse)")?.matches;
+    const supportsTextMask = Boolean(touchDevice && window.CSS?.supports?.("-webkit-text-security", "disc"));
     if (supportsTextMask) {
       input.type = "text";
       input.classList.add("masked-password");
