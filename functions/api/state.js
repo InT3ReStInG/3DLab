@@ -1,10 +1,117 @@
-const json = (body, status = 200) => Response.json(body, {
+const json = (body, status = 200, headers = {}) => Response.json(body, {
   status,
-  headers: { "Cache-Control": "no-store" },
+  headers: { "Cache-Control": "no-store", ...headers },
 });
 
 const overlaps = (startA, endA, startB, endB) => startA < endB && endA > startB;
 const minutes = value => Math.max(1, Math.round(Number(value) || 1));
+const SESSION_COOKIE = "pl750_session";
+const encoder = new TextEncoder();
+
+function base64url(bytes) {
+  let binary = "";
+  bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function randomToken(size = 32) {
+  const bytes = new Uint8Array(size);
+  crypto.getRandomValues(bytes);
+  return base64url(bytes);
+}
+
+async function sha256(value) {
+  return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value))));
+}
+
+async function passwordHash(password, salt) {
+  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({
+    name: "PBKDF2",
+    hash: "SHA-256",
+    salt: encoder.encode(salt),
+    iterations: 150000,
+  }, key, 256);
+  return base64url(new Uint8Array(bits));
+}
+
+function safeEqual(first, second) {
+  if (typeof first !== "string" || typeof second !== "string" || first.length !== second.length) return false;
+  let difference = 0;
+  for (let index = 0; index < first.length; index += 1) difference |= first.charCodeAt(index) ^ second.charCodeAt(index);
+  return difference === 0;
+}
+
+function cookieValue(request, name) {
+  const cookies = request.headers.get("Cookie") || "";
+  const match = cookies.split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : "";
+}
+
+function sessionCookie(token, maxAge) {
+  const age = Number.isFinite(maxAge) ? `; Max-Age=${maxAge}` : "";
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax${age}`;
+}
+
+function clearSessionCookie() {
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+}
+
+async function ensureAuthTables(db) {
+  await db.prepare("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, salt TEXT NOT NULL, can_edit INTEGER NOT NULL DEFAULT 0, printer_order TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL)").run();
+  try {
+    await db.prepare("ALTER TABLE users ADD COLUMN printer_order TEXT NOT NULL DEFAULT '[]'").run();
+  } catch (_) {}
+  await db.prepare("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)").run();
+}
+
+function publicUser(row) {
+  if (!row) return null;
+  let printerOrder = [];
+  try { printerOrder = JSON.parse(row.printer_order || "[]"); } catch (_) {}
+  return { id: row.id, name: row.name, canEdit: Boolean(row.can_edit), printerOrder: Array.isArray(printerOrder) ? printerOrder : [] };
+}
+
+async function currentUser(request, db) {
+  await ensureAuthTables(db);
+  const token = cookieValue(request, SESSION_COOKIE);
+  if (!token) return null;
+  const tokenHash = await sha256(token);
+  const row = await db.prepare("SELECT users.id,users.name,users.can_edit,users.printer_order,sessions.expires_at FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=?")
+    .bind(tokenHash).first();
+  if (!row || Number(row.expires_at) <= Date.now()) {
+    if (row) await db.prepare("DELETE FROM sessions WHERE token_hash=?").bind(tokenHash).run();
+    return null;
+  }
+  return publicUser(row);
+}
+
+function stateForUser(state, user) {
+  if (!user?.printerOrder?.length) return { ...state, user };
+  const positions = new Map(user.printerOrder.map((id, index) => [id, index]));
+  const fallback = state.printers.length + 1;
+  return {
+    ...state,
+    printers: [...state.printers].sort((first, second) =>
+      (positions.get(first.id) ?? fallback) - (positions.get(second.id) ?? fallback)
+    ),
+    user,
+  };
+}
+
+function validateSameOrigin(request) {
+  const origin = request.headers.get("Origin");
+  return !origin || origin === new URL(request.url).origin;
+}
+
+async function createSession(db, userId, remember) {
+  const token = randomToken();
+  const lifetime = remember ? 30 * 24 * 60 * 60 : 12 * 60 * 60;
+  await db.prepare("INSERT INTO sessions (token_hash,user_id,expires_at,created_at) VALUES (?,?,?,?)")
+    .bind(await sha256(token), userId, Date.now() + lifetime * 1000, Date.now()).run();
+  return { token, lifetime, remember };
+}
 
 function normalizePrinter(printer) {
   return {
@@ -388,13 +495,35 @@ function applyAction(state, body) {
     return;
   }
 
+  if (action === "editReservation") {
+    const existing = printer.reservations.find(item => item.id === body.reservationId);
+    if (!existing) throw new Error("Planlanan iş bulunamadı");
+    const startAt = Number(body.startAt);
+    const endAt = Number(body.endAt);
+    if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt) throw new Error("Planlanan zaman geçersiz");
+    if (startAt < Date.now() - 60000) throw new Error("Geçmiş bir saate planlama yapılamaz");
+    const conflict = busyConflict(printer, startAt, endAt, { includeQueue: true, ignoreReservationId: existing.id });
+    if (conflict) throw new Error(`Seçilen zaman ${conflict} ile çakışıyor`);
+    replacePrinter(state, {
+      ...printer,
+      reservations: printer.reservations.map(item => item.id === existing.id ? {
+        ...item,
+        purpose: requireText(body.purpose, "İş adı"),
+        startAt,
+        endAt,
+      } : item).sort((a, b) => a.startAt - b.startAt),
+    });
+    return;
+  }
+
   throw new Error("Geçersiz işlem");
 }
 
-export async function onRequestGet({ env }) {
+export async function onRequestGet({ request, env }) {
   if (!env.DB) return json({ error: "D1 veritabanı bağlantısı eksik. DB bağlantısını ekleyip yeniden yayınlayın." }, 500);
   try {
-    return json(await readState(env.DB));
+    const [state, user] = await Promise.all([readState(env.DB), currentUser(request, env.DB)]);
+    return json(stateForUser(state, user));
   } catch (error) {
     return json({ error: error.message || "Veritabanı hatası" }, 500);
   }
@@ -402,16 +531,96 @@ export async function onRequestGet({ env }) {
 
 export async function onRequestPost({ request, env }) {
   if (!env.DB) return json({ error: "D1 veritabanı bağlantısı eksik. DB bağlantısını ekleyip yeniden yayınlayın." }, 500);
+  if (!validateSameOrigin(request)) return json({ error: "Geçersiz istek kaynağı" }, 403);
   try {
-    const state = await readState(env.DB);
+    const user = await currentUser(request, env.DB);
+    if (!user) return json({ error: "Değişiklik yapmak için giriş yapın", code: "AUTH_REQUIRED" }, 401);
     const body = await request.json();
-    if (!body.entry?.user?.trim()) return json({ error: "Adınızı girmeniz gerekiyor" }, 400);
+    const state = await readState(env.DB);
+
+    if (body.action === "reorderPrinters") {
+      const existingIds = new Set(state.printers.map(printer => printer.id));
+      const order = [...new Set(Array.isArray(body.order) ? body.order.map(String) : [])]
+        .filter(id => existingIds.has(id));
+      if (order.length !== existingIds.size) {
+        state.printers.forEach(printer => {
+          if (!order.includes(printer.id)) order.push(printer.id);
+        });
+      }
+      await env.DB.prepare("UPDATE users SET printer_order=? WHERE id=?")
+        .bind(JSON.stringify(order), user.id).run();
+      user.printerOrder = order;
+      return json({ ok: true, state: stateForUser(state, user) });
+    }
+
+    if (!user.canEdit) return json({ error: "Hesabınız henüz değişiklik yapmak için onaylanmadı", code: "APPROVAL_REQUIRED" }, 403);
+    body.entry = { ...(body.entry || {}), user: user.name };
+    if (body.job) body.job.owner = user.name;
+    if (body.reservation) body.reservation.owner = user.name;
     applyAction(state, body);
+    body.entry = {
+      id: crypto.randomUUID(),
+      action: requireText(body.entry?.action, "İşlem"),
+      detail: String(body.entry?.detail || "").trim(),
+      user: user.name,
+      at: Date.now(),
+    };
     state.activity.unshift(body.entry);
     await writeState(env.DB, state);
-    return json({ ok: true, mode: body.resultMode, state });
+    return json({ ok: true, mode: body.resultMode, state: stateForUser(state, user) });
   } catch (error) {
     const status = /çakış|uygun değil|geçmiş|devam eden/.test(error.message || "") ? 409 : 400;
     return json({ error: error.message || "Veritabanı hatası" }, status);
+  }
+}
+
+export async function onAuthRequest({ request, env }) {
+  if (!env.DB) return json({ error: "D1 veritabanı bağlantısı eksik." }, 500);
+  await ensureAuthTables(env.DB);
+
+  if (request.method === "GET") {
+    return json({ user: await currentUser(request, env.DB) });
+  }
+  if (request.method !== "POST") return json({ error: "Method Not Allowed" }, 405, { Allow: "GET, POST" });
+  if (!validateSameOrigin(request)) return json({ error: "Geçersiz istek kaynağı" }, 403);
+
+  try {
+    const body = await request.json();
+    const mode = String(body.mode || "");
+
+    if (mode === "logout") {
+      const token = cookieValue(request, SESSION_COOKIE);
+      if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?").bind(await sha256(token)).run();
+      return json({ ok: true, user: null }, 200, { "Set-Cookie": clearSessionCookie() });
+    }
+
+    const name = requireText(body.name, "Ad");
+    const nameKey = name.toLocaleLowerCase("tr-TR");
+    const password = String(body.password || "");
+    if (name.length < 2 || name.length > 80) throw new Error("Ad 2–80 karakter olmalıdır");
+    if (password.length < 6 || password.length > 128) throw new Error("Şifre 6–128 karakter olmalıdır");
+
+    let user;
+    if (mode === "register") {
+      if (password !== String(body.passwordRepeat || "")) throw new Error("Şifreler eşleşmiyor");
+      const existing = await env.DB.prepare("SELECT id FROM users WHERE name_key=?").bind(nameKey).first();
+      if (existing) return json({ error: "Bu adla bir hesap zaten var" }, 409);
+      const salt = randomToken(18);
+      user = { id: crypto.randomUUID(), name, can_edit: 0 };
+      await env.DB.prepare("INSERT INTO users (id,name,name_key,password_hash,salt,can_edit,created_at) VALUES (?,?,?,?,?,0,?)")
+        .bind(user.id, name, nameKey, await passwordHash(password, salt), salt, Date.now()).run();
+    } else if (mode === "login") {
+      user = await env.DB.prepare("SELECT id,name,password_hash,salt,can_edit,printer_order FROM users WHERE name_key=?").bind(nameKey).first();
+      const attempted = await passwordHash(password, user?.salt || "invalid-user-salt");
+      if (!user || !safeEqual(attempted, user.password_hash)) return json({ error: "Ad veya şifre yanlış" }, 401);
+    } else {
+      throw new Error("Geçersiz kimlik doğrulama işlemi");
+    }
+
+    const session = await createSession(env.DB, user.id, Boolean(body.remember));
+    const cookie = sessionCookie(session.token, session.remember ? session.lifetime : undefined);
+    return json({ ok: true, user: publicUser(user) }, 200, { "Set-Cookie": cookie });
+  } catch (error) {
+    return json({ error: error.message || "Kimlik doğrulama hatası" }, 400);
   }
 }
