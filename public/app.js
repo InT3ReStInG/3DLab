@@ -189,15 +189,22 @@ function bindPasswordToggles() {
       const input = button.parentElement.querySelector("input");
       const visible = input.type === "text";
       input.type = visible ? "password" : "text";
-      button.textContent = visible ? "◉" : "◌";
+      button.classList.toggle("is-visible", !visible);
+      button.setAttribute("aria-pressed", String(!visible));
       button.setAttribute("aria-label", visible ? "Şifreyi göster" : "Şifreyi gizle");
     };
   });
 }
 
+function passwordToggleButton() {
+  return `<button class="password-toggle" type="button" data-password-toggle aria-label="Şifreyi göster" aria-pressed="false"><svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.7"></circle></svg><svg class="eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 6.1A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-2.3 3.1M6.2 6.2C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6c1.5 0 2.8-.4 4-.9"></path><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"></path></svg></button>`;
+}
+
 function authForm(mode = "login") {
   const registering = mode === "register";
-  showModal(`<form class="form auth-form"><h2>${registering ? "Kayıt ol" : "Giriş yap"}</h2><p class="form-intro">${registering ? "Hesabınız oluşturulduktan sonra değişiklik yetkisi laboratuvar sorumlusu tarafından açılır." : "Yazıcılar üzerinde değişiklik yapmak için hesabınıza giriş yapın."}</p><label>Adınız<input name="name" required minlength="2" maxlength="80" autocomplete="username" placeholder="Ad soyad"></label><label class="password-field">Şifre<input name="password" required minlength="6" maxlength="128" type="password" autocomplete="${registering ? "new-password" : "current-password"}" placeholder="En az 6 karakter"><button class="password-toggle" type="button" data-password-toggle aria-label="Şifreyi göster">◉</button></label>${registering ? '<label class="password-field">Şifreyi tekrarlayın<input name="passwordRepeat" required minlength="6" maxlength="128" type="password" autocomplete="new-password"><button class="password-toggle" type="button" data-password-toggle aria-label="Şifreyi göster">◉</button></label>' : ""}<label class="remember-row"><input name="remember" type="checkbox"> Beni hatırla</label><button class="submit">${registering ? "HESAP OLUŞTUR" : "GİRİŞ YAP"}</button><p class="auth-switch">${registering ? "Zaten hesabınız var mı?" : "Hesabınız yok mu?"} <button type="button" id="authSwitch">${registering ? "Giriş yapın" : "Kayıt olun"}</button></p></form>`, async event => {
+  const toggle = passwordToggleButton();
+  const repeatField = registering ? `<label class="password-field">Şifreyi tekrarlayın<input name="passwordRepeat" required minlength="6" maxlength="128" type="password" autocomplete="new-password">${toggle}</label>` : "";
+  showModal(`<form class="form auth-form"><h2>${registering ? "Kayıt ol" : "Giriş yap"}</h2><p class="form-intro">${registering ? "Hesabınız oluşturulduktan sonra değişiklik yetkisi laboratuvar sorumlusu tarafından açılır." : "Yazıcılar üzerinde değişiklik yapmak için hesabınıza giriş yapın."}</p><label>Adınız<input name="name" required minlength="2" maxlength="80" autocomplete="username" placeholder="Ad soyad"></label><label class="password-field">Şifre<input name="password" required minlength="6" maxlength="128" type="password" autocomplete="${registering ? "new-password" : "current-password"}" placeholder="En az 6 karakter">${toggle}</label>${repeatField}<label class="remember-row"><input name="remember" type="checkbox"> Beni hatırla</label><button class="submit">${registering ? "HESAP OLUŞTUR" : "GİRİŞ YAP"}</button><p class="auth-switch">${registering ? "Zaten hesabınız var mı?" : "Hesabınız yok mu?"} <button type="button" id="authSwitch">${registering ? "Giriş yapın" : "Kayıt olun"}</button></p></form>`, async event => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);

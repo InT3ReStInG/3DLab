@@ -360,16 +360,22 @@ button { color: inherit; }
 .auth-switch { margin: -3px 0 0; color: var(--muted); font-size: 10px; text-align: center; }
 .auth-switch button { padding: 0; border: 0; background: transparent; color: var(--blue); font-weight: 700; cursor: pointer; }
 .password-field { position: relative; }
-.password-field input { width: 100%; padding-right: 44px; }
-.password-toggle { position: absolute; right: 7px; bottom: 6px; width: 32px; height: 31px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #657184; cursor: pointer; }
+.password-field input { width: 100%; padding-right: 46px; -webkit-appearance: none; appearance: none; }
+.password-field input::-ms-reveal, .password-field input::-ms-clear { display: none; }
+.password-field input::-webkit-credentials-auto-fill-button { display: none !important; visibility: hidden; pointer-events: none; }
+.password-toggle { position: absolute; right: 7px; bottom: 6px; width: 34px; height: 31px; padding: 6px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #657184; cursor: pointer; }
 .password-toggle:hover { background: #eef2f6; }
+.password-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.password-toggle .eye-off { display: none; }
+.password-toggle.is-visible .eye-open { display: none; }
+.password-toggle.is-visible .eye-off { display: block; }
 .remember-row { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; font-weight: 550 !important; }
 .remember-row input { width: 16px; height: 16px; margin: 0; }
 .approval-card { text-align: center; }
 .approval-icon { width: 56px; height: 56px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 50%; background: #fff4d9; color: #8a5a15; font-size: 25px; }
 .approval-card h2 { margin-bottom: 8px; }
 .approval-card p { color: var(--muted); font-size: 11px; line-height: 1.55; }
-.toast { position: fixed; z-index: 30; right: 18px; bottom: 18px; max-width: min(420px, calc(100% - 36px)); padding: 11px 14px; border-radius: 8px; background: #172033; color: #fff; font-size: 11px; box-shadow: 0 8px 25px #11182733; }
+.toast { position: fixed; z-index: 1000; right: 18px; bottom: 18px; max-width: min(420px, calc(100% - 36px)); padding: 11px 14px; border-radius: 8px; background: #172033; color: #fff; font-size: 11px; box-shadow: 0 8px 25px #11182733; }
 footer { padding: 24px 2px 30px; display: flex; justify-content: space-between; color: #8a94a3; font-size: 9px; }
 
 @media (max-width: 900px) {
