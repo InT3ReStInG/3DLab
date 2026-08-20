@@ -30,7 +30,7 @@ async function passwordHash(password, salt) {
     name: "PBKDF2",
     hash: "SHA-256",
     salt: encoder.encode(salt),
-    iterations: 150000,
+    iterations: 10000,
   }, key, 256);
   return base64url(new Uint8Array(bits));
 }
