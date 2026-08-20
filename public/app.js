@@ -21,8 +21,7 @@ let calendarScroll = { top: 0, left: 0 };
 let calendarShouldFocusNow = true;
 let rememberedActor = "";
 let pendingSavedJobId = null;
-
-try { rememberedActor = sessionStorage.getItem("pl750-actor") || ""; } catch (_) {}
+let currentUser = null;
 
 const statusText = {
   free: "UYGUN",
@@ -125,7 +124,7 @@ function relative(at) {
 }
 
 function makeEntry(action, detail, user) {
-  return { id: makeId(), action, detail, user: user.trim(), at: Date.now() };
+  return { id: makeId(), action, detail, user: String(user || currentUser?.name || "").trim(), at: Date.now() };
 }
 
 function samePerson(first, second) {
@@ -134,10 +133,7 @@ function samePerson(first, second) {
 }
 
 function rememberActor(value) {
-  const actor = String(value || "").trim();
-  if (!actor) return;
-  rememberedActor = actor;
-  try { sessionStorage.setItem("pl750-actor", actor); } catch (_) {}
+  rememberedActor = currentUser?.name || String(value || "").trim();
 }
 
 async function api(body) {
@@ -148,7 +144,22 @@ async function api(body) {
   } : {};
   const response = await fetch("/api/state", options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "Değişiklik kaydedilemedi");
+  if (!response.ok) {
+    const error = new Error(data.error || "Değişiklik kaydedilemedi");
+    error.code = data.code;
+    throw error;
+  }
+  return data;
+}
+
+async function authApi(body) {
+  const response = await fetch("/api/auth", {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Kimlik doğrulama işlemi başarısız");
   return data;
 }
 
@@ -160,6 +171,105 @@ function toast(message) {
   toast.timer = setTimeout(() => element.classList.add("hidden"), 3000);
 }
 
+function renderAuth() {
+  const area = $("#authArea");
+  if (!currentUser) {
+    area.innerHTML = '<button class="header-button" id="loginButton">Giriş yap</button><button class="header-button primary" id="registerButton">Kayıt ol</button>';
+    $("#loginButton").onclick = () => authForm("login");
+    $("#registerButton").onclick = () => authForm("register");
+    return;
+  }
+  area.innerHTML = `<div class="account-chip"><div class="account-copy"><b>${esc(currentUser.name)}</b><small>${currentUser.canEdit ? "Değişiklik yetkisi var" : "Onay bekliyor"}</small></div><button class="header-button" id="logoutButton">Çıkış</button></div>`;
+  $("#logoutButton").onclick = logout;
+}
+
+function bindPasswordToggles() {
+  document.querySelectorAll("[data-password-toggle]").forEach(button => {
+    button.onclick = () => {
+      const input = button.parentElement.querySelector("input");
+      const visible = input.type === "text";
+      input.type = visible ? "password" : "text";
+      button.textContent = visible ? "◉" : "◌";
+      button.setAttribute("aria-label", visible ? "Şifreyi göster" : "Şifreyi gizle");
+    };
+  });
+}
+
+function authForm(mode = "login") {
+  const registering = mode === "register";
+  showModal(`<form class="form auth-form"><h2>${registering ? "Kayıt ol" : "Giriş yap"}</h2><p class="form-intro">${registering ? "Hesabınız oluşturulduktan sonra değişiklik yetkisi laboratuvar sorumlusu tarafından açılır." : "Yazıcılar üzerinde değişiklik yapmak için hesabınıza giriş yapın."}</p><label>Adınız<input name="name" required minlength="2" maxlength="80" autocomplete="username" placeholder="Ad soyad"></label><label class="password-field">Şifre<input name="password" required minlength="6" maxlength="128" type="password" autocomplete="${registering ? "new-password" : "current-password"}" placeholder="En az 6 karakter"><button class="password-toggle" type="button" data-password-toggle aria-label="Şifreyi göster">◉</button></label>${registering ? '<label class="password-field">Şifreyi tekrarlayın<input name="passwordRepeat" required minlength="6" maxlength="128" type="password" autocomplete="new-password"><button class="password-toggle" type="button" data-password-toggle aria-label="Şifreyi göster">◉</button></label>' : ""}<label class="remember-row"><input name="remember" type="checkbox"> Beni hatırla</label><button class="submit">${registering ? "HESAP OLUŞTUR" : "GİRİŞ YAP"}</button><p class="auth-switch">${registering ? "Zaten hesabınız var mı?" : "Hesabınız yok mu?"} <button type="button" id="authSwitch">${registering ? "Giriş yapın" : "Kayıt olun"}</button></p></form>`, async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const submit = form.querySelector(".submit");
+    submit.disabled = true;
+    try {
+      const result = await authApi({
+        mode,
+        name: String(data.get("name") || "").trim(),
+        password: String(data.get("password") || ""),
+        passwordRepeat: String(data.get("passwordRepeat") || ""),
+        remember: data.get("remember") === "on",
+      });
+      currentUser = result.user;
+      rememberedActor = currentUser?.name || "";
+      closeModal();
+      renderAuth();
+      render();
+      await load(true);
+      if (currentUser?.canEdit) toast("Giriş yapıldı");
+      else showApprovalMessage();
+    } catch (error) {
+      toast(error.message);
+      submit.disabled = false;
+    }
+  });
+  $("#authSwitch").onclick = () => authForm(registering ? "login" : "register");
+  bindPasswordToggles();
+}
+
+function showApprovalMessage() {
+  showModal(`<div class="approval-card"><div class="approval-icon">⌛</div><h2>Onay bekleniyor</h2><p><b>${esc(currentUser?.name || "Hesabınız")}</b> ile giriş yaptınız. Yazıcıları görüntüleyebilir ve kendi kart sıralamanızı değiştirebilirsiniz; diğer değişiklikler için laboratuvar sorumlusunun onayı gerekir.</p><button class="submit" id="approvalClose">TAMAM</button></div>`);
+  $("#approvalClose").onclick = closeModal;
+}
+
+function requireAccount() {
+  if (currentUser) return true;
+  authForm("login");
+  return false;
+}
+
+function requireEditAccess() {
+  if (!requireAccount()) return false;
+  if (!currentUser.canEdit) {
+    showApprovalMessage();
+    return false;
+  }
+  return true;
+}
+
+const guarded = callback => (...args) => {
+  if (requireEditAccess()) return callback(...args);
+};
+
+const guardedAccount = callback => (...args) => {
+  if (requireAccount()) return callback(...args);
+};
+
+async function logout() {
+  try {
+    await authApi({ mode: "logout" });
+    currentUser = null;
+    rememberedActor = "";
+    reorderMode = false;
+    closeModal();
+    await load(true);
+    toast("Çıkış yapıldı");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 async function load(silent = false) {
   if (silent && reorderMode) return;
   try {
@@ -167,6 +277,9 @@ async function load(silent = false) {
     printers = (data.printers || []).map(normalizePrinter);
     activity = data.activity || [];
     savedJobs = Array.isArray(data.savedJobs) ? data.savedJobs : [];
+    currentUser = data.user || null;
+    rememberedActor = currentUser?.name || "";
+    renderAuth();
     render();
   } catch (error) {
     if (!silent) toast(error.message);
@@ -183,11 +296,13 @@ function normalizePrinter(printer) {
 }
 
 async function mutate(action, payload, entry, successMessage = "Kaydedildi") {
+  if (action === "reorderPrinters" ? !requireAccount() : !requireEditAccess()) return null;
   try {
     const data = await api({ action, ...payload, entry });
     printers = (data.state?.printers || printers).map(normalizePrinter);
     activity = data.state?.activity || activity;
     savedJobs = Array.isArray(data.state?.savedJobs) ? data.state.savedJobs : savedJobs;
+    currentUser = data.state?.user || currentUser;
     render();
     toast(successMessage);
     return data;
@@ -515,7 +630,7 @@ function renderCalendar() {
 
   $("#calendarGrid").innerHTML = selected.length ? `<div class="timeline-scroll horizontal ${calendarMode}" id="calendarTimeline"><div class="horizontal-board" style="--printer-count:${selected.length};--hour-width:${hourWidth}px;--time-width:${timeWidth}px;--timeline-min-width:${minWidth}px"><div class="horizontal-corner">Yazıcı</div><div class="horizontal-time-head">${horizontalTimeScale(first, totalHours, hourWidth)}</div><div class="horizontal-printer-labels">${selected.map(horizontalPrinterLabel).join("")}</div><div class="horizontal-lanes">${selected.map(printer => horizontalLane(printer, rangeStart, rangeEnd, hourWidth)).join("")}${dayLines}${nowLine}</div></div></div>` : empty("En az bir yazıcı seçin");
 
-  document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = event => { event.stopPropagation(); cancelReservation(button.dataset.cancelReservation, button.dataset.reservation); });
+  document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = event => { event.stopPropagation(); guarded(cancelReservation)(button.dataset.cancelReservation, button.dataset.reservation); });
   document.querySelectorAll("[data-active-calendar-print]").forEach(eventElement => eventElement.onclick = event => { event.stopPropagation(); activePrintInfo(eventElement.dataset.activeCalendarPrint); });
   document.querySelectorAll("[data-calendar-print-history]").forEach(eventElement => eventElement.onclick = event => { event.stopPropagation(); printHistoryInfo(eventElement.dataset.historyPrinter, eventElement.dataset.calendarPrintHistory); });
   document.querySelectorAll("[data-calendar-scheduled]").forEach(eventElement => eventElement.onclick = event => { event.stopPropagation(); scheduledPrintInfo(eventElement.dataset.scheduledPrinter, eventElement.dataset.calendarScheduled); });
@@ -526,7 +641,7 @@ function renderCalendar() {
     const rawStart = rangeStart + clickedHours * 3600000;
     const startAt = Math.round(rawStart / 900000) * 900000;
     if (startAt < Date.now() - 60000) return toast("Geçmiş bir saate baskı planlanamaz");
-    scheduledPrintForm(lane.dataset.calendarLane, startAt);
+    if (requireEditAccess()) scheduledPrintForm(lane.dataset.calendarLane, startAt);
   });
   requestAnimationFrame(() => {
     const timeline = $("#calendarTimeline");
@@ -598,22 +713,22 @@ function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
 
 function bindDynamicControls() {
   document.querySelectorAll("[data-open]").forEach(button => button.onclick = () => openPrinter(button.dataset.open));
-  document.querySelectorAll("[data-delete]").forEach(button => button.onclick = event => { event.stopPropagation(); removePrinter(button.dataset.delete); });
-  document.querySelectorAll("[data-reserve]").forEach(button => button.onclick = () => reserveForm(button.dataset.reserve));
-  document.querySelectorAll("[data-edit-printer]").forEach(button => button.onclick = () => editPrinterForm(button.dataset.editPrinter));
-  document.querySelectorAll("[data-maintenance]").forEach(button => button.onclick = () => maintenanceForm(button.dataset.maintenance));
-  document.querySelectorAll("[data-cancel-print]").forEach(button => button.onclick = () => cancelCurrentPrint(button.dataset.cancelPrint));
-  document.querySelectorAll("[data-edit-planned]").forEach(button => button.onclick = () => editPlannedForm(button.dataset.editPlanned, button.dataset.reservation));
-  document.querySelectorAll("[data-edit-queue]").forEach(button => button.onclick = () => editQueueForm(button.dataset.editQueue, button.dataset.job));
-  document.querySelectorAll("[data-delete-queue]").forEach(button => button.onclick = () => deleteQueueJob(button.dataset.deleteQueue, button.dataset.job));
-  document.querySelectorAll("[data-use-saved]").forEach(button => button.onclick = () => useSavedJob(button.dataset.useSaved));
-  document.querySelectorAll("[data-edit-saved]").forEach(button => button.onclick = () => savedJobForm(button.dataset.editSaved));
-  document.querySelectorAll("[data-delete-saved]").forEach(button => button.onclick = () => deleteSavedJob(button.dataset.deleteSaved));
+  document.querySelectorAll("[data-delete]").forEach(button => button.onclick = event => { event.stopPropagation(); guarded(removePrinter)(button.dataset.delete); });
+  document.querySelectorAll("[data-reserve]").forEach(button => button.onclick = guarded(() => reserveForm(button.dataset.reserve)));
+  document.querySelectorAll("[data-edit-printer]").forEach(button => button.onclick = guarded(() => editPrinterForm(button.dataset.editPrinter)));
+  document.querySelectorAll("[data-maintenance]").forEach(button => button.onclick = guarded(() => maintenanceForm(button.dataset.maintenance)));
+  document.querySelectorAll("[data-cancel-print]").forEach(button => button.onclick = guarded(() => cancelCurrentPrint(button.dataset.cancelPrint)));
+  document.querySelectorAll("[data-edit-planned]").forEach(button => button.onclick = guarded(() => editPlannedForm(button.dataset.editPlanned, button.dataset.reservation)));
+  document.querySelectorAll("[data-edit-queue]").forEach(button => button.onclick = guarded(() => editQueueForm(button.dataset.editQueue, button.dataset.job)));
+  document.querySelectorAll("[data-delete-queue]").forEach(button => button.onclick = guarded(() => deleteQueueJob(button.dataset.deleteQueue, button.dataset.job)));
+  document.querySelectorAll("[data-use-saved]").forEach(button => button.onclick = guarded(() => useSavedJob(button.dataset.useSaved)));
+  document.querySelectorAll("[data-edit-saved]").forEach(button => button.onclick = guarded(() => savedJobForm(button.dataset.editSaved)));
+  document.querySelectorAll("[data-delete-saved]").forEach(button => button.onclick = guarded(() => deleteSavedJob(button.dataset.deleteSaved)));
   document.querySelectorAll("[data-printed-info]").forEach(button => button.onclick = () => printHistoryInfo(button.dataset.printedInfo, button.dataset.printId));
-  document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = () => cancelReservation(button.dataset.cancelReservation, button.dataset.reservation));
-  document.querySelectorAll("[data-move]").forEach(button => button.onclick = () => movePrinter(button.dataset.id, Number(button.dataset.move)));
+  document.querySelectorAll("[data-cancel-reservation]").forEach(button => button.onclick = guarded(() => cancelReservation(button.dataset.cancelReservation, button.dataset.reservation)));
+  document.querySelectorAll("[data-move]").forEach(button => button.onclick = guardedAccount(() => movePrinter(button.dataset.id, Number(button.dataset.move))));
   const add = $("[data-add]");
-  if (add) add.onclick = addForm;
+  if (add) add.onclick = guarded(addForm);
 
   if (reorderMode) {
     document.querySelectorAll("[data-printer]").forEach(cardElement => {
@@ -627,7 +742,7 @@ function showModal(html, onSubmit) {
   $("#modal").classList.remove("hidden");
   const form = $("#modalContent form");
   const actorInput = form?.querySelector('[name="actor"]');
-  if (actorInput && rememberedActor) actorInput.value = rememberedActor;
+  if (actorInput) actorInput.value = currentUser?.name || rememberedActor;
   if (form && onSubmit) form.onsubmit = event => {
     const submittedActor = form.querySelector('[name="actor"]')?.value;
     if (submittedActor) rememberActor(submittedActor);
@@ -659,6 +774,7 @@ function openPrinter(id) {
   if (!printer || reorderMode) return;
   if (printer.status === "maintenance") return toast("Bu yazıcı bakımda");
   if (printer.status === "broken") return toast("Bu yazıcı arızalı");
+  if (!requireEditAccess()) return;
   if (printer.status === "finished") return clearFinished(printer);
   if (printer.status === "free" && printer.queue.length) return startQueuedForm(printer);
   jobForm(printer);
@@ -728,13 +844,14 @@ function activePrintInfo(id) {
   const progress = printProgress(printer);
   const startedAt = printStartedAt(printer);
   showModal(`<div class="info-sheet"><small>DEVAM EDEN BASKI</small><input class="inline-title-input" id="currentPrintName" value="${esc(printer.job)}" aria-label="Baskı adını düzenle"><small class="inline-edit-hint">Adı değiştirip Enter'a basın veya dışarı dokunun</small><p>${esc(printer.name)} · ${esc(printer.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${startedAt ? dateTime(startedAt) : "—"}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(printer.endsAt)}</b></div><div><span>İlerleme</span><b>%${progress}</b></div><div><span>Kalan süre</span><b>${remaining(printer.endsAt)}</b></div></div><div class="modal-progress"><i style="width:${progress}%"></i></div><button class="submit danger" id="calendarCancelCurrent">BASKIYI İPTAL ET</button></div>`);
-  bindInlinePrintName($("#currentPrintName"), printer.job, async name => {
-    await mutate("editCurrentPrintName", { printerId: id, name }, makeEntry("Devam eden baskının adı değiştirildi", `${printer.job} → ${name} · ${printer.name}`, rememberedActor || "Oturum kullanıcısı"), "Baskı adı güncellendi");
+  $("#currentPrintName").readOnly = !currentUser?.canEdit;
+  if (currentUser?.canEdit) bindInlinePrintName($("#currentPrintName"), printer.job, async name => {
+    await mutate("editCurrentPrintName", { printerId: id, name }, makeEntry("Devam eden baskının adı değiştirildi", `${printer.job} → ${name} · ${printer.name}`, currentUser.name), "Baskı adı güncellendi");
   });
-  $("#calendarCancelCurrent").onclick = () => {
+  $("#calendarCancelCurrent").onclick = guarded(() => {
     closeModal();
     cancelCurrentPrint(id);
-  };
+  });
 }
 
 function addForm() {
@@ -847,7 +964,7 @@ function printHistoryInfo(printerId, printId) {
   if (!printer || !item) return toast("Baskı geçmişi kaydı bulunamadı");
   const duration = Math.max(1, Math.round((Number(item.endAt) - Number(item.startAt)) / 60000));
   showModal(`<div class="info-sheet"><small>TAMAMLANAN BASKI</small><h2>${esc(item.label || item.job)}</h2><p>${esc(printer.name)} · ${esc(item.owner || "—")}</p><div class="info-grid"><div><span>Başlangıç</span><b>${dateTime(item.startAt)}</b></div><div><span>Bitiş</span><b>${dateTime(item.endAt)}</b></div><div><span>Baskı süresi</span><b>${durationText(duration)}</b></div><div><span>Durum</span><b>✓ Tamamlandı</b></div></div><button class="submit danger" id="deletePrintedHistory">BU KAYDI SİL</button></div>`);
-  $("#deletePrintedHistory").onclick = () => deletePrintHistoryForm(printer, item);
+  $("#deletePrintedHistory").onclick = guarded(() => deletePrintHistoryForm(printer, item));
 }
 
 function deletePrintHistoryForm(printer, item) {
@@ -983,17 +1100,18 @@ function scheduledPrintInfo(printerId, reservationId) {
   const duration = Math.max(1, Math.round((Number(reservation.endAt) - Number(reservation.startAt)) / 60000));
   const untilStart = Number(reservation.startAt) > Date.now() ? remaining(reservation.startAt) : "Başlangıç zamanı geldi";
   showModal(`<div class="info-sheet"><small>PLANLI BASKI</small><input class="inline-title-input" id="scheduledPrintName" value="${esc(reservation.purpose)}" aria-label="Planlı baskı adını düzenle"><small class="inline-edit-hint">Adı değiştirip Enter'a basın veya dışarı dokunun</small><p>${esc(printer.name)} · ${esc(reservation.owner)}</p><div class="info-grid"><div><span>Başlangıç</span><b>${dateTime(reservation.startAt)}</b></div><div><span>Tahmini bitiş</span><b>${dateTime(reservation.endAt)}</b></div><div><span>Baskı süresi</span><b>${durationText(duration)}</b></div><div><span>Başlangıca kalan</span><b>${esc(untilStart)}</b></div></div><div class="info-actions"><button class="submit" id="calendarEditScheduled">✎ DÜZENLE</button><button class="submit danger" id="calendarCancelScheduled">İPTAL ET</button></div></div>`);
-  bindInlinePrintName($("#scheduledPrintName"), reservation.purpose, async name => {
-    await mutate("editScheduledPrintName", { printerId, reservationId, name }, makeEntry("Planlı baskının adı değiştirildi", `${reservation.purpose} → ${name} · ${printer.name}`, rememberedActor || "Oturum kullanıcısı"), "Planlı baskı adı güncellendi");
+  $("#scheduledPrintName").readOnly = !currentUser?.canEdit;
+  if (currentUser?.canEdit) bindInlinePrintName($("#scheduledPrintName"), reservation.purpose, async name => {
+    await mutate("editScheduledPrintName", { printerId, reservationId, name }, makeEntry("Planlı baskının adı değiştirildi", `${reservation.purpose} → ${name} · ${printer.name}`, currentUser.name), "Planlı baskı adı güncellendi");
   });
-  $("#calendarEditScheduled").onclick = () => {
+  $("#calendarEditScheduled").onclick = guarded(() => {
     closeModal();
     editPlannedForm(printerId, reservationId);
-  };
-  $("#calendarCancelScheduled").onclick = () => {
+  });
+  $("#calendarCancelScheduled").onclick = guarded(() => {
     closeModal();
     cancelReservation(printerId, reservationId);
-  };
+  });
 }
 
 function bindInlinePrintName(input, originalName, save) {
@@ -1254,8 +1372,8 @@ function setTab(next) {
 
 document.querySelectorAll(".tabs button").forEach(button => button.onclick = () => setTab(button.dataset.tab));
 document.querySelector("[data-open-tab]").onclick = () => setTab("history");
-$("#addSavedJob").onclick = () => savedJobForm();
-$("#reorderButton").onclick = beginOrSaveReorder;
+$("#addSavedJob").onclick = guarded(() => savedJobForm());
+$("#reorderButton").onclick = guardedAccount(beginOrSaveReorder);
 $("#cancelReorder").onclick = cancelReorder;
 $("#calendarDay").onclick = () => { calendarMode = "day"; calendarShouldFocusNow = true; renderCalendar(); };
 $("#calendarWeek").onclick = () => { calendarMode = "week"; calendarShouldFocusNow = true; renderCalendar(); };
