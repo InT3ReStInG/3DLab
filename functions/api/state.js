@@ -48,6 +48,12 @@ function cookieValue(request, name) {
   return match ? decodeURIComponent(match.slice(name.length + 1)) : "";
 }
 
+function sessionTokenFromRequest(request) {
+  const authorization = request.headers.get("Authorization") || "";
+  const match = authorization.match(/^Bearer\s+([A-Za-z0-9_-]+)$/i);
+  return match?.[1] || cookieValue(request, SESSION_COOKIE);
+}
+
 function sessionCookie(token, maxAge) {
   const age = Number.isFinite(maxAge) ? `; Max-Age=${maxAge}` : "";
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax${age}`;
@@ -75,7 +81,7 @@ function publicUser(row) {
 
 async function currentUser(request, db) {
   await ensureAuthTables(db);
-  const token = cookieValue(request, SESSION_COOKIE);
+  const token = sessionTokenFromRequest(request);
   if (!token) return null;
   const tokenHash = await sha256(token);
   const row = await db.prepare("SELECT users.id,users.name,users.can_edit,users.printer_order,sessions.expires_at FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=?")
@@ -589,7 +595,7 @@ export async function onAuthRequest({ request, env }) {
     const mode = String(body.mode || "");
 
     if (mode === "logout") {
-      const token = cookieValue(request, SESSION_COOKIE);
+      const token = sessionTokenFromRequest(request);
       if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?").bind(await sha256(token)).run();
       return json({ ok: true, user: null }, 200, { "Set-Cookie": clearSessionCookie() });
     }
@@ -619,7 +625,12 @@ export async function onAuthRequest({ request, env }) {
 
     const session = await createSession(env.DB, user.id, Boolean(body.remember));
     const cookie = sessionCookie(session.token, session.remember ? session.lifetime : undefined);
-    return json({ ok: true, user: publicUser(user) }, 200, { "Set-Cookie": cookie });
+    return json({
+      ok: true,
+      user: publicUser(user),
+      sessionToken: session.token,
+      remember: session.remember,
+    }, 200, { "Set-Cookie": cookie });
   } catch (error) {
     return json({ error: error.message || "Kimlik doğrulama hatası" }, 400);
   }
