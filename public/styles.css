@@ -361,6 +361,8 @@ button { color: inherit; }
 .auth-switch button { padding: 0; border: 0; background: transparent; color: var(--blue); font-weight: 700; cursor: pointer; }
 .password-field { position: relative; }
 .password-field input { width: 100%; padding-right: 46px; -webkit-appearance: none; appearance: none; }
+.password-field input.masked-password { -webkit-text-security: disc; }
+.password-field input.masked-password.password-visible { -webkit-text-security: none; }
 .password-field input::-ms-reveal, .password-field input::-ms-clear { display: none; }
 .password-field input::-webkit-credentials-auto-fill-button { display: none !important; visibility: hidden; pointer-events: none; }
 .password-toggle { position: absolute; right: 7px; bottom: 6px; width: 34px; height: 31px; padding: 6px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #657184; cursor: pointer; }

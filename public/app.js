@@ -219,13 +219,18 @@ function renderAuth() {
 
 function bindPasswordToggles() {
   document.querySelectorAll("[data-password-toggle]").forEach(button => {
+    const input = button.parentElement.querySelector("input");
+    const supportsTextMask = Boolean(window.CSS?.supports?.("-webkit-text-security", "disc"));
+    if (supportsTextMask) {
+      input.type = "text";
+      input.classList.add("masked-password");
+    }
     button.onclick = () => {
-      const input = button.parentElement.querySelector("input");
-      const visible = input.type === "text";
-      input.type = visible ? "password" : "text";
-      button.classList.toggle("is-visible", !visible);
-      button.setAttribute("aria-pressed", String(!visible));
-      button.setAttribute("aria-label", visible ? "Şifreyi göster" : "Şifreyi gizle");
+      const visible = button.classList.toggle("is-visible");
+      if (supportsTextMask) input.classList.toggle("password-visible", visible);
+      else input.type = visible ? "text" : "password";
+      button.setAttribute("aria-pressed", String(visible));
+      button.setAttribute("aria-label", visible ? "Şifreyi gizle" : "Şifreyi göster");
     };
   });
 }
