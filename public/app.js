@@ -22,6 +22,33 @@ let calendarShouldFocusNow = true;
 let rememberedActor = "";
 let pendingSavedJobId = null;
 let currentUser = null;
+const SESSION_TOKEN_KEY = "pl750-session-token";
+let sessionToken = readSessionToken();
+
+function readSessionToken() {
+  try {
+    return localStorage.getItem(SESSION_TOKEN_KEY) || sessionStorage.getItem(SESSION_TOKEN_KEY) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function saveSessionToken(token, remember) {
+  sessionToken = String(token || "");
+  try {
+    localStorage.removeItem(SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    if (sessionToken) (remember ? localStorage : sessionStorage).setItem(SESSION_TOKEN_KEY, sessionToken);
+  } catch (_) {}
+}
+
+function clearSessionToken() {
+  sessionToken = "";
+  try {
+    localStorage.removeItem(SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  } catch (_) {}
+}
 
 const statusText = {
   free: "UYGUN",
@@ -137,11 +164,15 @@ function rememberActor(value) {
 }
 
 async function api(body) {
-  const options = body ? {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  } : {};
+  const headers = {};
+  if (body) headers["Content-Type"] = "application/json";
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
+  const options = {
+    method: body ? "POST" : "GET",
+    headers,
+    credentials: "include",
+    body: body ? JSON.stringify(body) : undefined,
+  };
   const response = await fetch("/api/state", options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -153,9 +184,12 @@ async function api(body) {
 }
 
 async function authApi(body) {
+  const headers = body ? { "Content-Type": "application/json" } : {};
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
   const response = await fetch("/api/auth", {
     method: body ? "POST" : "GET",
-    headers: body ? { "Content-Type": "application/json" } : {},
+    headers,
+    credentials: "include",
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await response.json().catch(() => ({}));
@@ -211,19 +245,22 @@ function authForm(mode = "login") {
     const submit = form.querySelector(".submit");
     submit.disabled = true;
     try {
+      const remember = data.get("remember") === "on";
       const result = await authApi({
         mode,
         name: String(data.get("name") || "").trim(),
         password: String(data.get("password") || ""),
         passwordRepeat: String(data.get("passwordRepeat") || ""),
-        remember: data.get("remember") === "on",
+        remember,
       });
+      saveSessionToken(result.sessionToken, remember);
       currentUser = result.user;
       rememberedActor = currentUser?.name || "";
       closeModal();
       renderAuth();
       render();
       await load(true);
+      if (!currentUser) throw new Error("Oturum kaydedilemedi. Lütfen tekrar deneyin.");
       if (currentUser?.canEdit) toast("Giriş yapıldı");
       else showApprovalMessage();
     } catch (error) {
@@ -266,15 +303,16 @@ const guardedAccount = callback => (...args) => {
 async function logout() {
   try {
     await authApi({ mode: "logout" });
-    currentUser = null;
-    rememberedActor = "";
-    reorderMode = false;
-    closeModal();
-    await load(true);
-    toast("Çıkış yapıldı");
   } catch (error) {
     toast(error.message);
   }
+  clearSessionToken();
+  currentUser = null;
+  rememberedActor = "";
+  reorderMode = false;
+  closeModal();
+  await load(true);
+  toast("Çıkış yapıldı");
 }
 
 async function load(silent = false) {
@@ -285,6 +323,7 @@ async function load(silent = false) {
     activity = data.activity || [];
     savedJobs = Array.isArray(data.savedJobs) ? data.savedJobs : [];
     currentUser = data.user || null;
+    if (!currentUser && sessionToken) clearSessionToken();
     rememberedActor = currentUser?.name || "";
     renderAuth();
     render();
