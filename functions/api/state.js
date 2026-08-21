@@ -230,12 +230,19 @@ async function readState(db) {
 
   const now = Date.now();
   state.printers = state.printers.map(printer => {
-    if (printer.status !== "free") return printer;
+    if (!["free", "finished"].includes(printer.status)) return printer;
     const due = printer.reservations
       .filter(item => item.kind === "scheduled" && Number(item.startAt) <= now)
       .sort((a, b) => Number(a.startAt) - Number(b.startAt));
     if (!due.length) return printer;
 
+    const completedPrint = printer.status === "finished" && printer.job && printer.startedAt && printer.endsAt ? {
+      id: `print-${crypto.randomUUID()}`,
+      label: printer.job,
+      owner: printer.owner,
+      startAt: Number(printer.startedAt),
+      endAt: Number(printer.endsAt),
+    } : null;
     const active = due.find(item => Number(item.endAt) > now);
     const current = active || due[due.length - 1];
     const archived = due
@@ -252,8 +259,17 @@ async function readState(db) {
       endsAt: Number(current.endAt),
       duration: Math.max(1, Math.round((Number(current.endAt) - Number(current.startAt)) / 60000)),
       reservations: printer.reservations.filter(item => !dueIds.has(item.id)),
-      printHistory: [...printer.printHistory, ...archived].slice(-100),
+      printHistory: [...printer.printHistory, ...(completedPrint ? [completedPrint] : []), ...archived].slice(-100),
     };
+    if (completedPrint) {
+      state.activity.unshift({
+        id: crypto.randomUUID(),
+        action: "Tamamlanan baskı otomatik arşivlendi",
+        detail: `${printer.job} · ${printer.name}`,
+        user: "Sistem",
+        at: now,
+      });
+    }
     state.activity.unshift({
       id: crypto.randomUUID(),
       action: finished ? "Planlı baskı otomatik tamamlandı" : "Planlı baskı otomatik başlatıldı",
