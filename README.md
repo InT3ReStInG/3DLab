@@ -1,95 +1,63 @@
-# Printers Lab 750 — Cloudflare Kurulumu
+# Pressure-switch calibrator — Wokwi prototype
 
-Bu klasör internet sitesinin tamamını içerir:
+This project tests the complete user interface before hardware is purchased:
 
-- İnternet sitesi için Cloudflare Pages
-- `/api/state` sunucu işlemleri için Cloudflare Pages Functions
-- Yazıcılar ve işlem geçmişi için Cloudflare D1
-- Kaynak kodu ve otomatik yayınlama için GitHub
+- 20x4 LCD shows pressure, DUT switch voltage/state, main supply, sensor supply, 5V rail, and pump command.
+- LOW/OFF/HIGH calibration mode (two simulated switches: both off = OFF).
+- DUT switch changes between about 0V and 5V and sounds the buzzer on either transition.
+- The custom `ads1115-sim` I2C chip behaves like the subset of an ADS1115 used by the Arduino library.
 
-Herhangi bir derleme komutu, terminal, npm, ayrı sunucu, e-posta hizmeti veya Firebase hesabı gerekmez.
+## Run it
 
-## Klasör yapısı
+1. Create a new **Arduino Uno** project at Wokwi.
+2. Copy `sketch.ino`, `diagram.json`, and `libraries.txt` into the project.
+3. Add a custom C chip named **ads1115-sim**. Replace the generated chip files with `ads1115-sim.chip.c` and `ads1115-sim.chip.json`.
+4. Start the simulation. Click the custom ADS1115 chip to open its four voltage sliders.
 
-GitHub deponuzun ana dizinindeki yapı tam olarak şöyle olmalıdır:
+## Simulator controls
 
-```text
-printers-lab-750/
-├── functions/
-│   └── api/
-│       ├── auth.js
-│       └── state.js
-├── public/
-│   ├── _routes.json
-│   ├── app.js
-│   ├── index.html
-│   └── styles.css
-├── worker.js
-├── wrangler.toml
-└── README.md
-```
+| Control | Meaning | Useful setting |
+|---|---|---:|
+| AIN0 | Taber 0–5V pressure signal | `pressure/full-scale × 5V` |
+| AIN1 | Main 28V after 68k/10k divider | 3.59V = about 28.0V |
+| AIN2 | Sensor supply after 68k/10k divider | 3.59V = about 28.0V |
+| AIN3 | Pump's 0–5V speed command | 0–5V |
+| DUT switch | Pressure-switch contact | toggles Arduino A0 between 0V and 5V |
+| LOW/HIGH | Calibration mode | both off = OFF; both on = ERR |
 
-ZIP dosyasını doğrudan GitHub'a yüklemeyin. Önce ZIP'i açın, ardından yukarıda gösterilen klasör ve dosyaları yükleyin.
+## One required correction before real use
 
-## 1. Dosyaları GitHub'a yükleyin
+In `sketch.ino`, change `TABER_FULL_SCALE_BAR` to the exact full-scale pressure of your actual Taber M2911 transmitter. The photos identify the family and 0–5V output, but not the calibrated pressure range. An incorrect value gives an incorrect pressure display and trip pressure.
 
-1. GitHub'da yeni bir depo oluşturun. Depo adını, istediğiniz gizli adresle aynı yapabilirsiniz. Örneğin: `pl750-k7m4q2`.
-2. Depo gizli (private) olabilir. GitHub sorduğunda Cloudflare'a bu depoya erişim izni verin.
-3. Bu klasörün içindekileri deponun ana dizinine yükleyin.
-4. GitHub'ın üst seviyede hem `public` hem `functions` klasörünü gösterdiğini kontrol edin.
+## Real hardware wiring represented by the simulation
 
-## 2. Veritabanını oluşturun
+| From | To |
+|---|---|
+| Regulated 5V | Arduino 5V, LCD VCC, ADS1115 VDD, pot outer pin, DUT COM |
+| Common GND | Arduino/LCD/ADS GND, buzzer negative, divider bottoms, other pot outer pin |
+| Arduino A4/A5 | LCD and ADS1115 SDA/SCL in parallel |
+| Taber 0–5V output | ADS1115 A0 |
+| Main 28V through 68k/10k divider | ADS1115 A1 |
+| Sensor 28V through 68k/10k divider | ADS1115 A2 |
+| Pump-command pot wiper | pump white command wire and ADS1115 A3 |
+| DUT NO contact | 10k pulldown node, then 1k series resistor to Arduino A0 |
+| Arduino D8 | buzzer positive (only if buzzer current is <=15mA) |
+| 3-position selector common | GND; LOW to D3; HIGH to D4 |
 
-1. Cloudflare kontrol panelini açın.
-2. **Storage & Databases → D1 SQL Database** bölümüne gidin.
-3. **Create database** seçeneğine basın.
-4. Veritabanı adını `printers-lab-750-db` yapın.
-5. Tablo oluşturmayın ve SQL komutu çalıştırmayın. Uygulama ilk kullanımda gerekli tabloyu ve örnek verileri otomatik oluşturur.
+The real DUT circuit is **5V -> COM, NO -> sense node, 10k from sense node to GND, 1k from sense node to A0**. Wokwi's slide switch directly selects 0V/5V only to make the contact easy to simulate.
 
-## 3. Pages internet sitesini oluşturun
+## Minimal electronics BOM
 
-1. Cloudflare'da **Workers & Pages → Create application → Pages → Connect to Git** yolunu izleyin.
-2. GitHub'ı bağlayıp yüklediğiniz depoyu seçin.
-3. Proje adını adresinizde görünmesini istediğiniz gizli ad olarak ayarlayın. Örneğin `pl750-k7m4q2`; adresiniz `pl750-k7m4q2.pages.dev` olur. Seçtiğiniz adın daha önce alınmamış olması gerekir. Bu `pages.dev` adresi sonradan değiştirilemediği için proje adını ilk kurulumda doğru seçin.
-4. Derleme ayarlarını şöyle doldurun:
+- 1 Arduino Uno R3-compatible board
+- 1 ADS1115 breakout
+- 1 20x4 I2C LCD (0x27)
+- 1 28V-to-5V regulated buck converter, at least 1A
+- 1 10k linear potentiometer
+- 1 LOW-OFF-HIGH SPDT center-off selector
+- 1 5V buzzer drawing <=15mA (otherwise add a transistor driver)
+- 2 × 68k 1% resistors and 2 × 10k 1% resistors for the two 28V dividers
+- 1 × 10k resistor and 1 × 1k resistor for DUT sensing
+- 1 small screw-terminal prototyping PCB, terminal blocks, ferrules, wire, enclosure
+- Recommended: 3A pump fuse and 1A electronics fuse
 
-   - Production branch: `main`
-   - Framework preset: `None`
-   - Build command: boş bırakın
-   - Build output directory: `public`
-   - Root directory: boş bırakın
-
-5. **Save and Deploy** seçeneğine basın.
-
-Veritabanı bağlanmadan önce arayüz açılabilir. Bu normaldir.
-
-## 4. D1 veritabanını siteye bağlayın
-
-1. Cloudflare'da yeni Pages projesini açın.
-2. **Settings → Bindings** bölümüne gidin.
-3. Bir **D1 database binding** ekleyin.
-4. Variable name alanına tam olarak `DB` yazın. Büyük harf kullanın ve boşluk bırakmayın.
-5. Veritabanı olarak `printers-lab-750-db` seçeneğini seçin.
-6. Kaydedin.
-7. **Deployments** bölümünden son yayını yeniden yayınlayın. GitHub'a yeni bir commit göndermek de yeni yayın başlatır.
-
-Cloudflare'ın verdiği `pages.dev` adresini açın. Yazıcı listesi gelmelidir. Bir test değişikliği yapıp sayfayı yenileyin. Değişiklik korunuyorsa veritabanı çalışıyor demektir.
-
-## Siteyi daha sonra güncellemek
-
-GitHub'daki dosyaları düzenleyin veya değiştirin. `main` dalına gönderilen her commit Cloudflare Pages tarafından otomatik olarak yayınlanır.
-
-## Kayıt olan bir kullanıcıya değişiklik yetkisi verme
-
-Yeni hesaplar siteyi görüntüleyebilir fakat varsayılan olarak değişiklik yapamaz. Yetki vermek için:
-
-1. Cloudflare kontrol panelinde **Storage & Databases → D1 → pd750-gewh43 → Console** bölümünü açın.
-2. Aşağıdaki komutta kullanıcı adını kayıt sırasında yazılan adla değiştirip çalıştırın:
-
-```sql
-UPDATE users SET can_edit = 1 WHERE name = 'Ali Mammedzada';
-```
-
-Yetkiyi kaldırmak için aynı komutta `can_edit = 0` kullanın. Kullanıcı sayfayı yenilediğinde yeni yetki durumu görünür.
-
-Şifreler PBKDF2-SHA256 ile salt kullanılarak saklanır. Oturum belirteçleri yalnızca hash olarak D1 veritabanında tutulur ve tarayıcıya `HttpOnly`, `Secure`, `SameSite=Lax` çereziyle gönderilir.
+No relay is required for this measurement-only version.

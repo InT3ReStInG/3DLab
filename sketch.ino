@@ -1,0 +1,96 @@
+#include <Wire.h>
+#include <Adafruit_ADS1X15.h>
+#include <LiquidCrystal_I2C.h>
+
+Adafruit_ADS1115 ads;
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+// IMPORTANT: replace this with the full-scale pressure printed on the
+// actual Taber M2911 datasheet/calibration certificate used on your rig.
+const float TABER_FULL_SCALE_BAR = 12.0;
+const float DIVIDER_RATIO = 7.8; // (68k + 10k) / 10k
+
+const byte DUT_SENSE_PIN = A0;
+const byte LOW_MODE_PIN = 3;
+const byte HIGH_MODE_PIN = 4;
+const byte BUZZER_PIN = 8;
+
+float pressureBar, vin28, sensor28, commandV, switchV;
+bool previousClosed = false;
+unsigned long tripMessageUntil = 0;
+float lastTripPressure = 0;
+
+float adsVoltage(uint8_t channel) {
+  int16_t raw = ads.readADC_SingleEnded(channel);
+  return ads.computeVolts(raw);
+}
+
+void printFixedLine(byte row, const String &text) {
+  lcd.setCursor(0, row);
+  String line = text;
+  while (line.length() < 20) line += ' ';
+  lcd.print(line.substring(0, 20));
+}
+
+String modeName() {
+  bool low = digitalRead(LOW_MODE_PIN) == LOW;
+  bool high = digitalRead(HIGH_MODE_PIN) == LOW;
+  if (low && high) return "ERR";
+  if (low) return "LOW";
+  if (high) return "HIGH";
+  return "OFF";
+}
+
+void setup() {
+  pinMode(LOW_MODE_PIN, INPUT_PULLUP);
+  pinMode(HIGH_MODE_PIN, INPUT_PULLUP);
+  pinMode(BUZZER_PIN, OUTPUT);
+  Serial.begin(115200);
+  Wire.begin();
+  lcd.init();
+  lcd.backlight();
+  printFixedLine(0, "Pressure Calibrator");
+  printFixedLine(1, "Starting...");
+
+  if (!ads.begin(0x48)) {
+    printFixedLine(2, "ADS1115 NOT FOUND");
+    while (true) delay(100);
+  }
+  ads.setGain(GAIN_TWOTHIRDS); // +/-6.144V range: safe for 0..5V inputs
+  delay(500);
+}
+
+void loop() {
+  float pressureSignalV = adsVoltage(0);
+  vin28 = adsVoltage(1) * DIVIDER_RATIO;
+  sensor28 = adsVoltage(2) * DIVIDER_RATIO;
+  commandV = adsVoltage(3);
+  switchV = analogRead(DUT_SENSE_PIN) * (5.0 / 1023.0);
+  pressureBar = constrain(pressureSignalV / 5.0 * TABER_FULL_SCALE_BAR,
+                          0.0, TABER_FULL_SCALE_BAR);
+
+  bool closed = switchV > 2.5;
+  if (closed != previousClosed) {
+    lastTripPressure = pressureBar;
+    tripMessageUntil = millis() + 1800;
+    tone(BUZZER_PIN, closed ? 2200 : 1400, 350);
+    previousClosed = closed;
+  }
+
+  if (millis() < tripMessageUntil) {
+    printFixedLine(0, closed ? "*** SWITCH CLOSED **" : "*** SWITCH OPEN ***");
+    printFixedLine(1, "Trip P:" + String(lastTripPressure, 2) + " bar");
+  } else {
+    printFixedLine(0, "MODE:" + modeName() + " P:" + String(pressureBar, 2) + "bar");
+    printFixedLine(1, "SW:" + String(switchV, 2) + "V " + (closed ? "CLOSED" : "OPEN"));
+  }
+  printFixedLine(2, "VIN:" + String(vin28, 1) + " S:" + String(sensor28, 1) + "V");
+  printFixedLine(3, "5V:5.00 CMD:" + String(commandV, 2) + "V");
+
+  Serial.print("P="); Serial.print(pressureBar, 3);
+  Serial.print("bar SW="); Serial.print(switchV, 2);
+  Serial.print("V VIN="); Serial.print(vin28, 1);
+  Serial.print("V SENSOR="); Serial.print(sensor28, 1);
+  Serial.print("V CMD="); Serial.println(commandV, 2);
+  delay(120);
+}

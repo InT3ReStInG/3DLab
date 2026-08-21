@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "author": "Pressure switch calibrator",
+  "editor": "wokwi",
+  "parts": [
+    {"type":"wokwi-arduino-uno","id":"uno","top":120,"left":40,"attrs":{}},
+    {"type":"wokwi-lcd2004","id":"lcd","top":-170,"left":25,"attrs":{"pins":"i2c"}},
+    {"type":"chip-ads1115-sim","id":"ads","top":-120,"left":400,"attrs":{"ain0Voltage":"0.50","ain1Voltage":"3.59","ain2Voltage":"3.59","ain3Voltage":"2.50"}},
+    {"type":"wokwi-buzzer","id":"buzz","top":180,"left":435,"attrs":{"volume":"0.25"}},
+    {"type":"wokwi-slide-switch","id":"dut","top":310,"left":430,"attrs":{"value":"","bounce":"0"}},
+    {"type":"wokwi-slide-switch","id":"low","top":420,"left":70,"attrs":{"value":"1","bounce":"0"}},
+    {"type":"wokwi-slide-switch","id":"high","top":420,"left":240,"attrs":{"value":"1","bounce":"0"}},
+    {"type":"wokwi-text","id":"t1","top":275,"left":390,"attrs":{"text":"DUT switch: 0V / 5V"}},
+    {"type":"wokwi-text","id":"t2","top":385,"left":55,"attrs":{"text":"LOW MODE"}},
+    {"type":"wokwi-text","id":"t3","top":385,"left":225,"attrs":{"text":"HIGH MODE"}}
+  ],
+  "connections": [
+    ["uno:5V","lcd:VCC","red",[]], ["uno:GND.1","lcd:GND","black",[]],
+    ["uno:A4","lcd:SDA","green",[]], ["uno:A5","lcd:SCL","blue",[]],
+    ["uno:5V","ads:VCC","red",[]], ["uno:GND.1","ads:GND","black",[]],
+    ["uno:A4","ads:SDA","green",[]], ["uno:A5","ads:SCL","blue",[]],
+    ["buzz:1","uno:GND.2","black",[]], ["buzz:2","uno:8","purple",[]],
+    ["dut:1","uno:GND.2","black",[]], ["dut:2","uno:A0","orange",[]], ["dut:3","uno:5V","red",[]],
+    ["low:1","uno:GND.2","black",[]], ["low:2","uno:3","orange",[]], ["low:3","uno:5V","red",[]],
+    ["high:1","uno:GND.2","black",[]], ["high:2","uno:4","orange",[]], ["high:3","uno:5V","red",[]]
+  ]
+}

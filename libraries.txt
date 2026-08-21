@@ -1,0 +1,2 @@
+Adafruit ADS1X15
+LiquidCrystal I2C
