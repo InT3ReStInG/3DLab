@@ -6,6 +6,7 @@
 typedef struct {
   uint32_t ain_attr[4];
   pin_t pot_pin;
+  pin_t adjust_pin;
   pin_t mode_pin;
   pin_t dut_pin;
   uint8_t reg_pointer;
@@ -20,17 +21,23 @@ typedef struct {
 
 // Simulation-only plant model. Turning the pot moves pressure from 0 to 3 bar.
 // The real rig's pressure/flow relationship is hydraulic and will not be linear.
-#define SIM_MAX_PRESSURE_BAR 3.0f
+#define SIM_LOW_MAX_PRESSURE_BAR 3.0f
+#define SIM_HIGH_MAX_PRESSURE_BAR 9.0f
 #define SENSOR_FULL_SCALE_PSIA 150.0f
 #define ATMOSPHERIC_PSIA 14.696f
 #define BAR_TO_PSI 14.5037738f
 
 static void update_plant(chip_state_t *chip) {
   float command_v = pin_adc_read(chip->pot_pin);
-  float pressure_bar_gauge = command_v / 5.0f * SIM_MAX_PRESSURE_BAR;
   bool high_mode = pin_adc_read(chip->mode_pin) > 2.5f;
-  float trip = high_mode ? 2.0f : 0.2f;
-  float reset = high_mode ? 1.8f : 0.15f;
+  float max_pressure = high_mode ? SIM_HIGH_MAX_PRESSURE_BAR : SIM_LOW_MAX_PRESSURE_BAR;
+  float pressure_bar_gauge = command_v / 5.0f * max_pressure;
+  float adjust_v = pin_adc_read(chip->adjust_pin);
+  // The second pot represents turning the DUT's mechanical adjustment screw.
+  float trip = high_mode ? (1.0f + adjust_v / 5.0f * 8.0f)
+                         : (0.2f + adjust_v / 5.0f * 2.3f);
+  // Simulation-only hysteresis; replace with measured DUT behavior if known.
+  float reset = trip - (high_mode ? 0.2f : 0.05f);
 
   if (!chip->dut_closed && pressure_bar_gauge >= trip) chip->dut_closed = true;
   if (chip->dut_closed && pressure_bar_gauge <= reset) chip->dut_closed = false;
@@ -53,7 +60,9 @@ static void update_conversion(chip_state_t *chip) {
   uint8_t mux = (chip->config >> 12) & 7;
   uint8_t channel = (mux >= 4) ? mux - 4 : 0;
   float command_v = pin_adc_read(chip->pot_pin);
-  float pressure_bar_gauge = command_v / 5.0f * SIM_MAX_PRESSURE_BAR;
+  bool high_mode = pin_adc_read(chip->mode_pin) > 2.5f;
+  float max_pressure = high_mode ? SIM_HIGH_MAX_PRESSURE_BAR : SIM_LOW_MAX_PRESSURE_BAR;
+  float pressure_bar_gauge = command_v / 5.0f * max_pressure;
   float pressure_psia = ATMOSPHERIC_PSIA + pressure_bar_gauge * BAR_TO_PSI;
   float volts;
   if (channel == 0) volts = pressure_psia / SENSOR_FULL_SCALE_PSIA * 5.0f;
@@ -120,7 +129,8 @@ void chip_init(void) {
   chip->high_thresh = 0x7fff;
   chip->ain_attr[1] = attr_init_float("ain1Voltage", 3.59f);
   chip->ain_attr[2] = attr_init_float("ain2Voltage", 3.59f);
-  chip->pot_pin = pin_init("POT", ANALOG);
+  chip->pot_pin = pin_init("PUMP", ANALOG);
+  chip->adjust_pin = pin_init("ADJUST", ANALOG);
   chip->mode_pin = pin_init("MODE", ANALOG);
   chip->dut_pin = pin_init("DUT", ANALOG);
   pin_dac_write(chip->dut_pin, 0.0f);

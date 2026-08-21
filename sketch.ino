@@ -14,10 +14,12 @@ const float PSI_TO_BAR = 0.0689476;
 const float DIVIDER_RATIO = 7.8; // (68k + 10k) / 10k
 
 const byte DUT_SENSE_PIN = A0;
+const byte DUT_ADJUST_PIN = A1;
 const byte MODE_PIN = 3; // LOW=0V, HIGH=5V
 const byte BUZZER_PIN = 8;
 
 float pressureBar, pressurePsia, vin28, sensor28, commandV, switchV;
+float adjustV, simulatedSetpointBar;
 bool previousClosed = false;
 unsigned long tripMessageUntil = 0;
 float lastTripPressure = 0;
@@ -62,6 +64,12 @@ void loop() {
   sensor28 = adsVoltage(2) * DIVIDER_RATIO;
   commandV = adsVoltage(3);
   switchV = analogRead(DUT_SENSE_PIN) * (5.0 / 1023.0);
+  adjustV = analogRead(DUT_ADJUST_PIN) * (5.0 / 1023.0);
+  if (digitalRead(MODE_PIN) == LOW) {
+    simulatedSetpointBar = 0.2 + adjustV / 5.0 * 2.3; // 0.2..2.5 bar
+  } else {
+    simulatedSetpointBar = 1.0 + adjustV / 5.0 * 8.0; // 1..9 bar bench model
+  }
   pressurePsia = pressureSignalV / 5.0 * TABER_FULL_SCALE_PSIA;
   pressureBar = (pressurePsia - ATMOSPHERIC_PSIA) * PSI_TO_BAR;
   // Small negative readings can occur from tolerance/noise at atmosphere.
@@ -79,17 +87,21 @@ void loop() {
     printFixedLine(0, closed ? "*** SWITCH CLOSED **" : "*** SWITCH OPEN ***");
     printFixedLine(1, "Trip P:" + String(lastTripPressure, 2) + " bar");
   } else {
-    printFixedLine(0, "MODE:" + modeName() + " P:" + String(pressureBar, 2) + "bar");
+    printFixedLine(0, modeName().substring(0, 1) + " P:" + String(pressureBar, 2) +
+                      " T:" + String(simulatedSetpointBar, 2));
     printFixedLine(1, "SW:" + String(switchV, 2) + "V " + (closed ? "CLOSED" : "OPEN"));
   }
   printFixedLine(2, "VIN:" + String(vin28, 1) + " S:" + String(sensor28, 1) + "V");
-  printFixedLine(3, "5V:5.00 CMD:" + String(commandV, 2) + "V");
+  printFixedLine(3, "5V:5.0 C:" + String(commandV, 1) + " A:" + String(adjustV, 1));
 
   Serial.print("P="); Serial.print(pressureBar, 3);
   Serial.print("bar(g) ABS="); Serial.print(pressurePsia, 2);
   Serial.print("psia SW="); Serial.print(switchV, 2);
   Serial.print("V VIN="); Serial.print(vin28, 1);
   Serial.print("V SENSOR="); Serial.print(sensor28, 1);
-  Serial.print("V CMD="); Serial.println(commandV, 2);
+  Serial.print("V CMD="); Serial.print(commandV, 2);
+  Serial.print("V ADJ="); Serial.print(adjustV, 2);
+  Serial.print("V SET="); Serial.print(simulatedSetpointBar, 2);
+  Serial.println("bar");
   delay(120);
 }

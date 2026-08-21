@@ -7,9 +7,11 @@
     {"type":"wokwi-lcd2004","id":"lcd","top":-170,"left":25,"attrs":{"pins":"i2c"}},
     {"type":"chip-ads1115-sim","id":"ads","top":-120,"left":400,"attrs":{"ain1Voltage":"3.59","ain2Voltage":"3.59"}},
     {"type":"wokwi-buzzer","id":"buzz","top":180,"left":435,"attrs":{"volume":"0.25"}},
-    {"type":"wokwi-potentiometer","id":"pot","top":310,"left":430,"attrs":{"value":"0"}},
+    {"type":"wokwi-potentiometer","id":"pot","top":310,"left":400,"attrs":{"value":"0"}},
+    {"type":"wokwi-potentiometer","id":"adjust","top":310,"left":560,"attrs":{"value":"0"}},
     {"type":"wokwi-slide-switch","id":"mode","top":420,"left":150,"attrs":{"value":"","bounce":"0"}},
-    {"type":"wokwi-text","id":"t1","top":275,"left":380,"attrs":{"text":"PRESSURE / PUMP CONTROL"}},
+    {"type":"wokwi-text","id":"t1","top":275,"left":365,"attrs":{"text":"PRESSURE / PUMP"}},
+    {"type":"wokwi-text","id":"t4","top":275,"left":535,"attrs":{"text":"DUT SCREW ADJUST"}},
     {"type":"wokwi-text","id":"t2","top":385,"left":100,"attrs":{"text":"ONE SWITCH: LOW / HIGH"}},
     {"type":"wokwi-text","id":"t3","top":70,"left":420,"attrs":{"text":"AUTO DUT + ADS1115 MODEL"}}
   ],
@@ -19,7 +21,9 @@
     ["uno:5V","ads:VCC","red",[]], ["uno:GND.1","ads:GND","black",[]],
     ["uno:A4","ads:SDA","green",[]], ["uno:A5","ads:SCL","blue",[]],
     ["buzz:1","uno:GND.2","black",[]], ["buzz:2","uno:8","purple",[]],
-    ["pot:VCC","uno:5V","red",[]], ["pot:GND","uno:GND.2","black",[]], ["pot:SIG","ads:POT","orange",[]],
+    ["pot:VCC","uno:5V","red",[]], ["pot:GND","uno:GND.2","black",[]], ["pot:SIG","ads:PUMP","orange",[]],
+    ["adjust:VCC","uno:5V","red",[]], ["adjust:GND","uno:GND.2","black",[]],
+    ["adjust:SIG","ads:ADJUST","green",[]], ["adjust:SIG","uno:A1","green",[]],
     ["mode:1","uno:GND.2","black",[]], ["mode:2","uno:3","orange",[]], ["mode:2","ads:MODE","orange",[]], ["mode:3","uno:5V","red",[]],
     ["ads:DUT","uno:A0","purple",[]]
   ]

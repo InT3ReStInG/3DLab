@@ -1,7 +1,7 @@
 {
   "name": "ADS1115 Rig Simulator",
   "author": "OpenAI for pressure-switch calibrator",
-  "pins": ["VCC", "GND", "SCL", "SDA", "POT", "MODE", "DUT"],
+  "pins": ["VCC", "GND", "SCL", "SDA", "PUMP", "ADJUST", "MODE", "DUT"],
   "controls": [
     {"id":"ain1Voltage","label":"AIN1: main 28V divider (V)","type":"range","min":0,"max":5,"step":0.01},
     {"id":"ain2Voltage","label":"AIN2: sensor 28V divider (V)","type":"range","min":0,"max":5,"step":0.01}
