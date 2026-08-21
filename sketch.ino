@@ -5,17 +5,19 @@
 Adafruit_ADS1115 ads;
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
-// IMPORTANT: replace this with the full-scale pressure printed on the
-// actual Taber M2911 datasheet/calibration certificate used on your rig.
-const float TABER_FULL_SCALE_BAR = 12.0;
+// Taber M2911 identified by its label: 0-150 PSIA, 0-5V output.
+// PSIA is absolute pressure, so subtract local atmospheric pressure to
+// display the gauge pressure used to calibrate the pressure switches.
+const float TABER_FULL_SCALE_PSIA = 150.0;
+const float ATMOSPHERIC_PSIA = 14.696; // standard atmosphere; field-zero below
+const float PSI_TO_BAR = 0.0689476;
 const float DIVIDER_RATIO = 7.8; // (68k + 10k) / 10k
 
 const byte DUT_SENSE_PIN = A0;
-const byte LOW_MODE_PIN = 3;
-const byte HIGH_MODE_PIN = 4;
+const byte MODE_PIN = 3; // LOW=0V, HIGH=5V
 const byte BUZZER_PIN = 8;
 
-float pressureBar, vin28, sensor28, commandV, switchV;
+float pressureBar, pressurePsia, vin28, sensor28, commandV, switchV;
 bool previousClosed = false;
 unsigned long tripMessageUntil = 0;
 float lastTripPressure = 0;
@@ -33,17 +35,11 @@ void printFixedLine(byte row, const String &text) {
 }
 
 String modeName() {
-  bool low = digitalRead(LOW_MODE_PIN) == LOW;
-  bool high = digitalRead(HIGH_MODE_PIN) == LOW;
-  if (low && high) return "ERR";
-  if (low) return "LOW";
-  if (high) return "HIGH";
-  return "OFF";
+  return digitalRead(MODE_PIN) == LOW ? "LOW" : "HIGH";
 }
 
 void setup() {
-  pinMode(LOW_MODE_PIN, INPUT_PULLUP);
-  pinMode(HIGH_MODE_PIN, INPUT_PULLUP);
+  pinMode(MODE_PIN, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
   Serial.begin(115200);
   Wire.begin();
@@ -66,8 +62,10 @@ void loop() {
   sensor28 = adsVoltage(2) * DIVIDER_RATIO;
   commandV = adsVoltage(3);
   switchV = analogRead(DUT_SENSE_PIN) * (5.0 / 1023.0);
-  pressureBar = constrain(pressureSignalV / 5.0 * TABER_FULL_SCALE_BAR,
-                          0.0, TABER_FULL_SCALE_BAR);
+  pressurePsia = pressureSignalV / 5.0 * TABER_FULL_SCALE_PSIA;
+  pressureBar = (pressurePsia - ATMOSPHERIC_PSIA) * PSI_TO_BAR;
+  // Small negative readings can occur from tolerance/noise at atmosphere.
+  if (pressureBar < 0.0) pressureBar = 0.0;
 
   bool closed = switchV > 2.5;
   if (closed != previousClosed) {
@@ -88,7 +86,8 @@ void loop() {
   printFixedLine(3, "5V:5.00 CMD:" + String(commandV, 2) + "V");
 
   Serial.print("P="); Serial.print(pressureBar, 3);
-  Serial.print("bar SW="); Serial.print(switchV, 2);
+  Serial.print("bar(g) ABS="); Serial.print(pressurePsia, 2);
+  Serial.print("psia SW="); Serial.print(switchV, 2);
   Serial.print("V VIN="); Serial.print(vin28, 1);
   Serial.print("V SENSOR="); Serial.print(sensor28, 1);
   Serial.print("V CMD="); Serial.println(commandV, 2);

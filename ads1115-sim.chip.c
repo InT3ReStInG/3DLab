@@ -5,6 +5,9 @@
 
 typedef struct {
   uint32_t ain_attr[4];
+  pin_t pot_pin;
+  pin_t mode_pin;
+  pin_t dut_pin;
   uint8_t reg_pointer;
   uint8_t byte_index;
   uint16_t config;
@@ -12,7 +15,27 @@ typedef struct {
   uint16_t low_thresh;
   uint16_t high_thresh;
   bool read_transaction;
+  bool dut_closed;
 } chip_state_t;
+
+// Simulation-only plant model. Turning the pot moves pressure from 0 to 3 bar.
+// The real rig's pressure/flow relationship is hydraulic and will not be linear.
+#define SIM_MAX_PRESSURE_BAR 3.0f
+#define SENSOR_FULL_SCALE_PSIA 150.0f
+#define ATMOSPHERIC_PSIA 14.696f
+#define BAR_TO_PSI 14.5037738f
+
+static void update_plant(chip_state_t *chip) {
+  float command_v = pin_adc_read(chip->pot_pin);
+  float pressure_bar_gauge = command_v / 5.0f * SIM_MAX_PRESSURE_BAR;
+  bool high_mode = pin_adc_read(chip->mode_pin) > 2.5f;
+  float trip = high_mode ? 2.0f : 0.2f;
+  float reset = high_mode ? 1.8f : 0.15f;
+
+  if (!chip->dut_closed && pressure_bar_gauge >= trip) chip->dut_closed = true;
+  if (chip->dut_closed && pressure_bar_gauge <= reset) chip->dut_closed = false;
+  pin_dac_write(chip->dut_pin, chip->dut_closed ? 5.0f : 0.0f);
+}
 
 static float full_scale(uint16_t config) {
   switch ((config >> 9) & 7) {
@@ -26,9 +49,16 @@ static float full_scale(uint16_t config) {
 }
 
 static void update_conversion(chip_state_t *chip) {
+  update_plant(chip);
   uint8_t mux = (chip->config >> 12) & 7;
   uint8_t channel = (mux >= 4) ? mux - 4 : 0;
-  float volts = attr_read_float(chip->ain_attr[channel]);
+  float command_v = pin_adc_read(chip->pot_pin);
+  float pressure_bar_gauge = command_v / 5.0f * SIM_MAX_PRESSURE_BAR;
+  float pressure_psia = ATMOSPHERIC_PSIA + pressure_bar_gauge * BAR_TO_PSI;
+  float volts;
+  if (channel == 0) volts = pressure_psia / SENSOR_FULL_SCALE_PSIA * 5.0f;
+  else if (channel == 3) volts = command_v;
+  else volts = attr_read_float(chip->ain_attr[channel]);
   float fs = full_scale(chip->config);
   int32_t code = (int32_t)(volts / fs * 32768.0f);
   if (code > 32767) code = 32767;
@@ -88,10 +118,12 @@ void chip_init(void) {
   chip->config = 0x8583;
   chip->low_thresh = 0x8000;
   chip->high_thresh = 0x7fff;
-  chip->ain_attr[0] = attr_init_float("ain0Voltage", 0.50f);
   chip->ain_attr[1] = attr_init_float("ain1Voltage", 3.59f);
   chip->ain_attr[2] = attr_init_float("ain2Voltage", 3.59f);
-  chip->ain_attr[3] = attr_init_float("ain3Voltage", 2.50f);
+  chip->pot_pin = pin_init("POT", ANALOG);
+  chip->mode_pin = pin_init("MODE", ANALOG);
+  chip->dut_pin = pin_init("DUT", ANALOG);
+  pin_dac_write(chip->dut_pin, 0.0f);
 
   i2c_config_t config = {
     .address = 0x48,
