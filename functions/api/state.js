@@ -222,8 +222,15 @@ async function readState(db) {
       }
     }
     if (printer.status === "printing" && printer.endsAt && printer.endsAt <= Date.now()) {
+      printer = { ...printer, status: "finished" };
       changed = true;
-      return { ...printer, status: "finished" };
+    }
+    if (printer.status === "finished" && printer.savedJobId) {
+      state.savedJobs = state.savedJobs.filter(job => job.id !== printer.savedJobId);
+      const next = { ...printer };
+      delete next.savedJobId;
+      changed = true;
+      return next;
     }
     return printer;
   });
@@ -250,6 +257,14 @@ async function readState(db) {
       .map(item => ({ id: `print-${item.id}`, label: item.purpose, owner: item.owner, startAt: Number(item.startAt), endAt: Number(item.endAt) }));
     const dueIds = new Set(due.map(item => item.id));
     const finished = Number(current.endAt) <= now;
+    const completedSavedJobIds = new Set(due
+      .filter(item => item.id !== current.id || finished)
+      .map(item => item.savedJobId)
+      .filter(Boolean));
+    if (!finished && current.savedJobId) completedSavedJobIds.delete(current.savedJobId);
+    if (completedSavedJobIds.size) {
+      state.savedJobs = state.savedJobs.filter(job => !completedSavedJobIds.has(job.id));
+    }
     const next = {
       ...printer,
       status: finished ? "finished" : "printing",
@@ -261,6 +276,8 @@ async function readState(db) {
       reservations: printer.reservations.filter(item => !dueIds.has(item.id)),
       printHistory: [...printer.printHistory, ...(completedPrint ? [completedPrint] : []), ...archived].slice(-100),
     };
+    if (!finished && current.savedJobId) next.savedJobId = current.savedJobId;
+    else delete next.savedJobId;
     if (completedPrint) {
       state.activity.unshift({
         id: crypto.randomUUID(),
@@ -437,6 +454,7 @@ function applyAction(state, body) {
     delete next.duration;
     delete next.startedAt;
     delete next.endsAt;
+    delete next.savedJobId;
     replacePrinter(state, next);
     return;
   }
@@ -449,6 +467,7 @@ function applyAction(state, body) {
     delete next.duration;
     delete next.startedAt;
     delete next.endsAt;
+    delete next.savedJobId;
     replacePrinter(state, next);
     return;
   }
@@ -502,6 +521,7 @@ function applyAction(state, body) {
       startAt,
       endAt: savedJob ? startAt + minutes(savedJob.duration) * 60000 : Number(body.reservation?.endAt),
       kind: action === "addScheduledPrint" ? "scheduled" : "reservation",
+      savedJobId: savedJob?.id || null,
     };
     if (!Number.isFinite(reservation.startAt) || !Number.isFinite(reservation.endAt) || reservation.endAt <= reservation.startAt) throw new Error("Rezervasyon zamanı geçersiz");
     if (reservation.startAt < Date.now() - 60000) throw new Error("Geçmiş bir saate rezervasyon yapılamaz");
