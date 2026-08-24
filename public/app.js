@@ -579,7 +579,11 @@ function completedPrintRows() {
 
 function savedJobRow(job) {
   const created = job.createdAt ? `${esc(job.createdBy || "—")} · ${dateTime(job.createdAt)}` : "Kayıtlı iş";
-  return `<div class="saved-job-row"><div class="saved-job-icon">▣</div><div><b>${esc(job.name)}</b><span>${durationText(job.duration)}</span><small>${created}</small></div><div class="row-actions"><button data-use-saved="${job.id}">Takvimde kullan</button><button data-edit-saved="${job.id}">Düzenle</button><button class="danger-link" data-delete-saved="${job.id}">Sil</button></div></div>`;
+  const activePrinter = printers.find(printer => printer.status === "printing" && printer.savedJobId === job.id);
+  const printingStatus = activePrinter
+    ? `<span class="saved-job-status">● ŞU ANDA BASILIYOR · ${esc(activePrinter.name)}</span>`
+    : "";
+  return `<div class="saved-job-row ${activePrinter ? "is-printing" : ""}"><div class="saved-job-icon">▣</div><div><b>${esc(job.name)}</b>${printingStatus}<span class="saved-job-duration">${durationText(job.duration)}</span><small>${created}</small></div><div class="row-actions"><button data-use-saved="${job.id}">Takvimde kullan</button><button data-edit-saved="${job.id}">Düzenle</button><button class="danger-link" data-delete-saved="${job.id}">Sil</button></div></div>`;
 }
 
 function printedJobRow(item) {
@@ -1036,7 +1040,10 @@ function scheduledPrintForm(printerId, suggestedStart, preferredSavedJob = null)
   const start = new Date(suggestedStart);
   const initialJob = preferredSavedJob || savedJobs.find(item => item.id === pendingSavedJobId) || null;
   pendingSavedJobId = null;
-  const savedSelector = savedJobs.length ? `<label>Kayıtlı iş kullan<select name="savedJob" id="scheduledSavedJob"><option value="">Elle gir</option>${savedJobs.map(job => `<option value="${job.id}" ${initialJob?.id === job.id ? "selected" : ""}>${esc(job.name)} · ${durationText(job.duration)}</option>`).join("")}</select></label>` : "";
+  const savedSelector = savedJobs.length ? `<label>Kayıtlı iş kullan<select name="savedJob" id="scheduledSavedJob"><option value="">Elle gir</option>${savedJobs.map(job => {
+    const isPrinting = printers.some(item => item.status === "printing" && item.savedJobId === job.id);
+    return `<option value="${job.id}" ${initialJob?.id === job.id ? "selected" : ""}>${isPrinting ? "🟢 BASKIDA · " : ""}${esc(job.name)} · ${durationText(job.duration)}</option>`;
+  }).join("")}</select></label>` : "";
   showModal(`<form class="form"><h2>Planlı baskı ekle</h2><p class="form-intro"><b>${esc(printer.name)}</b> için takvimden bir başlangıç zamanı seçtiniz. Çakışan bir zaman kaydedilemez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label>${savedSelector}<label>Baskı / iş adı<input name="purpose" required value="${esc(initialJob?.name || "")}" placeholder="Örn. Bağlantı braketi"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><fieldset id="scheduledDuration" class="${initialJob ? "duration-locked" : ""}"><legend>Tahmini süre <span>${initialJob ? "· Kayıtlı iş süresi" : ""}</span></legend>${durationFields("duration", initialJob?.duration || 60)}</fieldset><button class="submit">BASKIYI PLANLA</button></form>`, async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);

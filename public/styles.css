@@ -165,11 +165,15 @@ button { color: inherit; }
 .row-actions button { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: #536074; font-size: 8px; cursor: pointer; }
 .row-actions .danger-link { color: var(--red); }
 .saved-job-row { min-height: 76px; padding: 13px 18px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; align-items: center; border-bottom: 1px solid #edf0f4; }
+.saved-job-row.is-printing { background: #f0fbf5; box-shadow: inset 4px 0 0 var(--green); }
 .saved-job-row:last-child, .printed-job-row:last-child { border-bottom: 0; }
 .saved-job-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 9px; background: #edf4ff; color: var(--blue); font-size: 18px; }
+.saved-job-row.is-printing .saved-job-icon { background: #d9f4e7; color: var(--green); }
 .saved-job-row b, .saved-job-row span, .saved-job-row small { display: block; }
 .saved-job-row b { font-size: 11px; }
 .saved-job-row span { margin-top: 3px; color: var(--blue); font-size: 9px; font-weight: 700; }
+.saved-job-row .saved-job-status { width: fit-content; margin-top: 5px; padding: 3px 7px; border-radius: 999px; background: #d9f4e7; color: #11704c; font-size: 8px; letter-spacing: .02em; }
+.saved-job-row .saved-job-duration { color: var(--blue); }
 .saved-job-row small { margin-top: 3px; color: #838d9c; font-size: 8px; }
 .printed-job-row { width: 100%; min-height: 74px; padding: 13px 18px; display: grid; grid-template-columns: 6px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; border: 0; border-bottom: 1px solid #edf0f4; background: #fff; text-align: left; cursor: pointer; }
 .printed-job-row:hover { background: #f8fbfa; }
