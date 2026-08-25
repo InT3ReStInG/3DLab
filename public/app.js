@@ -787,13 +787,13 @@ function horizontalLane(printer, rangeStart, rangeEnd, hourWidth) {
   if (["maintenance", "broken"].includes(printer.status)) {
     const width = (rangeEnd - rangeStart) / 3600000 * hourWidth;
     const broken = printer.status === "broken";
-    return `<div class="horizontal-lane" data-calendar-lane="${printer.id}"><div class="horizontal-event ${broken ? "broken" : "maintenance"}" style="left:3px;width:${Math.max(30, width - 6)}px"><b>${broken ? "✕ Arızalı" : "Bakımda"}</b><span>${esc(printer.maintenanceNote || (broken ? "Servis dışı" : "Bakım modu"))}</span></div></div>`;
+    return `<div class="horizontal-lane" data-calendar-lane="${printer.id}" data-range-start="${rangeStart}" data-range-end="${rangeEnd}" data-hour-width="${hourWidth}"><div class="horizontal-event ${broken ? "broken" : "maintenance"}" style="left:3px;width:${Math.max(30, width - 6)}px"><b>${broken ? "✕ Arızalı" : "Bakımda"}</b><span>${esc(printer.maintenanceNote || (broken ? "Servis dışı" : "Bakım modu"))}</span></div></div>`;
   }
   const events = scheduleEvents(printer)
     .filter(item => item.startAt < rangeEnd && item.endAt > rangeStart)
     .map(item => horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth))
     .join("");
-  return `<div class="horizontal-lane" data-calendar-lane="${printer.id}" title="Boş alana tıklayarak baskı planlayın">${events}</div>`;
+  return `<div class="horizontal-lane" data-calendar-lane="${printer.id}" data-range-start="${rangeStart}" data-range-end="${rangeEnd}" data-hour-width="${hourWidth}" title="Boş alana tıklayarak baskı planlayın">${events}</div>`;
 }
 
 function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
@@ -819,18 +819,72 @@ function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
   return `<div class="horizontal-event ${item.type} ${completed ? "completed" : ""} ${upcoming ? "upcoming" : ""} ${interaction ? "interactive" : ""} ${width < 105 ? "compact" : ""}" ${interaction} style="left:${left + 2}px;width:${Math.max(24, width - 4)}px" title="${esc(item.label)} · ${esc(item.owner)} · ${esc(fullRange)}${completed ? " · Tamamlandı" : upcoming ? " · Bir saatten az kaldı" : ""}"><div><small>${completed ? "✓ Tamamlandı" : upcoming ? `⚠ ${remaining(item.startAt)} kaldı` : typeText} · ${esc(fullRange)}</small><b>${esc(item.label)}</b><span>${esc(item.owner)}</span></div>${dragHandle}${completed ? "" : cancel}</div>`;
 }
 
-function clearScheduledDragUi() {
-  document.querySelectorAll(".scheduled-dragging, .scheduled-drop-target").forEach(element => element.classList.remove("scheduled-dragging", "scheduled-drop-target"));
+function clearScheduledDropPreview() {
+  document.querySelectorAll(".scheduled-drop-target").forEach(element => element.classList.remove("scheduled-drop-target"));
+  document.querySelectorAll(".scheduled-drop-preview").forEach(element => element.remove());
 }
 
-async function moveScheduledPrint(sourcePrinterId, targetPrinterId, reservationId) {
-  if (!sourcePrinterId || !targetPrinterId || sourcePrinterId === targetPrinterId) return;
+function clearScheduledDragUi() {
+  document.querySelectorAll(".scheduled-dragging").forEach(element => element.classList.remove("scheduled-dragging"));
+  clearScheduledDropPreview();
+}
+
+function scheduledDragDetails(handle, clientX) {
+  const source = printers.find(item => item.id === handle.dataset.dragPrinter);
+  const reservation = source?.reservations?.find(item => item.id === handle.dataset.dragScheduled && item.kind === "scheduled");
+  const eventElement = handle.closest(".horizontal-event");
+  const lane = handle.closest("[data-calendar-lane]");
+  if (!source || !reservation || !eventElement || !lane) return null;
+  const hourWidth = Number(lane.dataset.hourWidth);
+  const offsetPixels = Math.max(0, clientX - eventElement.getBoundingClientRect().left);
+  return {
+    sourcePrinterId: source.id,
+    reservationId: reservation.id,
+    duration: Number(reservation.endAt) - Number(reservation.startAt),
+    grabOffset: offsetPixels / hourWidth * 3600000,
+    targetPrinterId: null,
+    startAt: null,
+    endAt: null,
+  };
+}
+
+function updateScheduledDropPreview(lane, clientX, drag) {
+  clearScheduledDropPreview();
+  if (!lane || !drag) return;
+  const rangeStart = Number(lane.dataset.rangeStart);
+  const rangeEnd = Number(lane.dataset.rangeEnd);
+  const hourWidth = Number(lane.dataset.hourWidth);
+  const laneRect = lane.getBoundingClientRect();
+  const pointerTime = rangeStart + (clientX - laneRect.left) / hourWidth * 3600000;
+  const latestStart = Math.max(rangeStart, rangeEnd - drag.duration);
+  const rawStart = pointerTime - drag.grabOffset;
+  const startAt = Math.min(latestStart, Math.max(rangeStart, Math.round(rawStart / 900000) * 900000));
+  const endAt = startAt + drag.duration;
+  const preview = document.createElement("div");
+  const targetPrinter = printers.find(item => item.id === lane.dataset.calendarLane);
+  const unavailable = ["maintenance", "broken"].includes(targetPrinter?.status);
+  const invalid = startAt < Date.now() - 60000 || unavailable;
+  preview.className = `scheduled-drop-preview ${invalid ? "invalid" : ""}`;
+  preview.style.left = `${(startAt - rangeStart) / 3600000 * hourWidth + 2}px`;
+  preview.style.width = `${Math.max(24, drag.duration / 3600000 * hourWidth - 4)}px`;
+  const message = unavailable ? (targetPrinter.status === "broken" ? "Arızalı yazıcıya taşınamaz" : "Bakımdaki yazıcıya taşınamaz") : invalid ? "Geçmiş saate taşınamaz" : "Buraya taşınacak";
+  preview.innerHTML = `<b>${message}</b><span>${dateTime(startAt)} → ${timeValue(endAt)}</span>`;
+  lane.append(preview);
+  lane.classList.add("scheduled-drop-target");
+  drag.targetPrinterId = lane.dataset.calendarLane;
+  drag.startAt = startAt;
+  drag.endAt = endAt;
+  drag.invalid = invalid;
+}
+
+async function moveScheduledPrint(sourcePrinterId, targetPrinterId, reservationId, startAt, endAt) {
+  if (!sourcePrinterId || !targetPrinterId || !Number.isFinite(startAt) || !Number.isFinite(endAt)) return;
   const source = printers.find(item => item.id === sourcePrinterId);
   const target = printers.find(item => item.id === targetPrinterId);
   const reservation = source?.reservations?.find(item => item.id === reservationId && item.kind === "scheduled");
   if (!source || !target || !reservation) return toast("Planlı baskı bulunamadı");
   try {
-    await mutate("moveScheduledPrint", { printerId: source.id, targetPrinterId: target.id, reservationId }, makeEntry("Planlı baskı başka yazıcıya taşındı", `${reservation.purpose} · ${source.name} → ${target.name} · ${dateTime(reservation.startAt)}`, currentUser?.name || ""), "Planlı baskı yeni yazıcıya taşındı");
+    await mutate("moveScheduledPrint", { printerId: source.id, targetPrinterId: target.id, reservationId, startAt }, makeEntry("Planlı baskı takvimde taşındı", `${reservation.purpose} · ${source.name} ${dateTime(reservation.startAt)} → ${target.name} ${dateTime(startAt)}`, currentUser?.name || ""), "Planlı baskının yazıcısı ve zamanı güncellendi");
   } catch (_) {}
 }
 
@@ -843,7 +897,8 @@ function bindScheduledPrintDrag() {
     handle.ondragstart = event => {
       event.stopPropagation();
       if (!requireEditAccess()) return event.preventDefault();
-      calendarScheduledDrag = { sourcePrinterId: handle.dataset.dragPrinter, reservationId: handle.dataset.dragScheduled };
+      calendarScheduledDrag = scheduledDragDetails(handle, event.clientX);
+      if (!calendarScheduledDrag) return event.preventDefault();
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", JSON.stringify(calendarScheduledDrag));
       handle.closest(".horizontal-event")?.classList.add("scheduled-dragging");
@@ -855,7 +910,8 @@ function bindScheduledPrintDrag() {
     handle.onpointerdown = event => {
       event.stopPropagation();
       if (event.pointerType !== "touch" || !currentUser?.canEdit) return;
-      const drag = { sourcePrinterId: handle.dataset.dragPrinter, reservationId: handle.dataset.dragScheduled, pointerId: event.pointerId, active: false, targetPrinterId: null };
+      const drag = { ...scheduledDragDetails(handle, event.clientX), pointerId: event.pointerId, active: false };
+      if (!drag.sourcePrinterId) return;
       drag.timer = setTimeout(() => {
         drag.active = true;
         calendarScheduledDrag = drag;
@@ -870,14 +926,13 @@ function bindScheduledPrintDrag() {
       if (!drag || drag.pointerId !== event.pointerId || !drag.active) return;
       event.preventDefault();
       const lane = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-calendar-lane]");
-      lanes.forEach(item => item.classList.toggle("scheduled-drop-target", item === lane && item.dataset.calendarLane !== drag.sourcePrinterId));
-      drag.targetPrinterId = lane?.dataset.calendarLane || null;
+      updateScheduledDropPreview(lane, event.clientX, drag);
     };
     handle.onpointerup = event => {
       const drag = calendarScheduledDrag;
       if (!drag || drag.pointerId !== event.pointerId) return;
       clearTimeout(drag.timer);
-      if (drag.active && drag.targetPrinterId) moveScheduledPrint(drag.sourcePrinterId, drag.targetPrinterId, drag.reservationId);
+      if (drag.active && drag.targetPrinterId && !drag.invalid) moveScheduledPrint(drag.sourcePrinterId, drag.targetPrinterId, drag.reservationId, drag.startAt, drag.endAt);
       calendarScheduledDrag = null;
       clearScheduledDragUi();
     };
@@ -885,20 +940,20 @@ function bindScheduledPrintDrag() {
   });
   lanes.forEach(lane => {
     lane.ondragover = event => {
-      if (!calendarScheduledDrag || lane.dataset.calendarLane === calendarScheduledDrag.sourcePrinterId) return;
+      if (!calendarScheduledDrag) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      lanes.forEach(item => item.classList.toggle("scheduled-drop-target", item === lane));
+      updateScheduledDropPreview(lane, event.clientX, calendarScheduledDrag);
     };
     lane.ondragleave = event => {
-      if (!lane.contains(event.relatedTarget)) lane.classList.remove("scheduled-drop-target");
+      if (!lane.contains(event.relatedTarget)) clearScheduledDropPreview();
     };
     lane.ondrop = event => {
       event.preventDefault();
       event.stopPropagation();
       const drag = calendarScheduledDrag;
       clearScheduledDragUi();
-      if (drag) moveScheduledPrint(drag.sourcePrinterId, lane.dataset.calendarLane, drag.reservationId);
+      if (drag && !drag.invalid) moveScheduledPrint(drag.sourcePrinterId, lane.dataset.calendarLane, drag.reservationId, drag.startAt, drag.endAt);
       calendarScheduledDrag = null;
     };
   });

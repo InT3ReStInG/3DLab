@@ -294,6 +294,11 @@ button { color: inherit; }
 .horizontal-lane { position: relative; width: var(--time-width); height: 86px; border-bottom: 1px solid var(--line); cursor: crosshair; background: repeating-linear-gradient(to right, transparent 0, transparent calc(var(--hour-width) - 1px), #e7ebf0 calc(var(--hour-width) - 1px), #e7ebf0 var(--hour-width)); }
 .horizontal-lane:hover { background-color: #f9fbfd; }
 .horizontal-lane.scheduled-drop-target { background-color: #e8f1ff; box-shadow: inset 0 0 0 2px var(--blue); }
+.scheduled-drop-preview { position: absolute; z-index: 9; top: 7px; height: 72px; min-width: 24px; padding: 9px; overflow: hidden; border: 2px solid var(--blue); border-radius: 7px; background: #dbeafeeb; color: #17448f; box-shadow: 0 4px 16px #2563eb4d; pointer-events: none; }
+.scheduled-drop-preview b, .scheduled-drop-preview span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheduled-drop-preview b { font-size: 9px; }
+.scheduled-drop-preview span { margin-top: 6px; font-size: 7px; font-weight: 700; }
+.scheduled-drop-preview.invalid { border-color: var(--red); background: #ffe5e8ed; color: #9a2230; }
 .horizontal-weekend-band { position: absolute; z-index: 2; top: 0; bottom: 0; background: #6b72801c; pointer-events: none; }
 .horizontal-day-divider { position: absolute; z-index: 1; top: 0; bottom: 0; width: 2px; background: #a8b3c1; pointer-events: none; }
 .horizontal-now-line { position: absolute; z-index: 7; top: 0; bottom: 0; width: 2px; background: var(--red); pointer-events: none; box-shadow: 0 0 0 1px #fff8; }
