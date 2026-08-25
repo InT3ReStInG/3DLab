@@ -537,6 +537,27 @@ function applyAction(state, body) {
     return;
   }
 
+  if (action === "moveScheduledPrint") {
+    const targetPrinter = findPrinter(state, body.targetPrinterId);
+    if (!printer || !targetPrinter) throw new Error("Yazıcı bulunamadı");
+    if (printer.id === targetPrinter.id) return;
+    const existing = printer.reservations.find(item => item.id === body.reservationId && item.kind === "scheduled");
+    if (!existing) throw new Error("Planlı baskı bulunamadı");
+    if (Number(existing.startAt) < Date.now() - 60000) throw new Error("Başlamış veya geçmiş bir baskı taşınamaz");
+    if (["maintenance", "broken"].includes(targetPrinter.status)) {
+      throw new Error(targetPrinter.status === "broken" ? "Planlı baskı arızalı yazıcıya taşınamaz" : "Planlı baskı bakımdaki yazıcıya taşınamaz");
+    }
+    const conflict = busyConflict(targetPrinter, Number(existing.startAt), Number(existing.endAt), { includeQueue: true });
+    if (conflict) throw new Error(`Hedef yazıcıda seçilen zaman ${conflict} ile çakışıyor`);
+    replacePrinter(state, { ...printer, reservations: printer.reservations.filter(item => item.id !== existing.id) });
+    replacePrinter(state, {
+      ...targetPrinter,
+      reservations: [...targetPrinter.reservations, existing].sort((a, b) => a.startAt - b.startAt),
+    });
+    body.movedReservation = existing;
+    return;
+  }
+
   if (action === "editReservation") {
     const existing = printer.reservations.find(item => item.id === body.reservationId);
     if (!existing) throw new Error("Planlanan iş bulunamadı");
