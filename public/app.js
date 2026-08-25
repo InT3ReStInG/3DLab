@@ -76,11 +76,46 @@ function dateValue(value) {
 }
 
 function timeValue(value) {
-  return new Date(value).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+  const date = new Date(value);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 function dateTime(value) {
-  return new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
+  const date = new Date(value);
+  return `${date.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })} · ${timeValue(date)}`;
+}
+
+function shortDateTime(value) {
+  const date = new Date(value);
+  return `${date.toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} · ${timeValue(date)}`;
+}
+
+function timeField(name, value) {
+  return `<input name="${name}" required type="text" inputmode="numeric" autocomplete="off" data-time-24 maxlength="5" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" title="Saati 24 saat biçiminde SS:DD olarak girin (ör. 14:30)" placeholder="SS:DD" value="${timeValue(value)}">`;
+}
+
+function parseDateTime24(dateText, timeText) {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateText || ""));
+  const timeMatch = /^(?:([01]\d|2[0-3])):([0-5]\d)$/.exec(String(timeText || ""));
+  if (!dateMatch || !timeMatch) throw new Error("Saati 24 saat biçiminde SS:DD olarak girin (ör. 14:30)");
+  return new Date(
+    Number(dateMatch[1]),
+    Number(dateMatch[2]) - 1,
+    Number(dateMatch[3]),
+    Number(timeMatch[1]),
+    Number(timeMatch[2]),
+    0,
+    0,
+  ).getTime();
+}
+
+function bind24HourInputs() {
+  document.querySelectorAll("[data-time-24]").forEach(input => {
+    input.addEventListener("input", () => {
+      const digits = input.value.replace(/\D/g, "").slice(0, 4);
+      input.value = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+    });
+  });
 }
 
 function makeId() {
@@ -99,7 +134,7 @@ function makeId() {
 
 function updateHeaderClock() {
   const now = new Date();
-  $("#headerTime").textContent = now.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  $("#headerTime").textContent = `${timeValue(now)}:${String(now.getSeconds()).padStart(2, "0")}`;
   $("#headerDate").textContent = now.toLocaleDateString("tr-TR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const calendarTodayDate = $("#calendarTodayDate");
   if (calendarTodayDate) calendarTodayDate.textContent = `Bugün · ${now.toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" })}`;
@@ -753,7 +788,7 @@ function horizontalEvent(item, printer, rangeStart, rangeEnd, hourWidth) {
   const left = (clippedStart - rangeStart) / 3600000 * hourWidth;
   const width = Math.max(28, (clippedEnd - clippedStart) / 3600000 * hourWidth);
   const typeText = { print: "Baskı", reservation: "Rezervasyon", scheduled: "Planlı baskı", queue: "Sıra" }[item.type];
-  const fullRange = `${new Date(item.startAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} → ${new Date(item.endAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`;
+  const fullRange = `${shortDateTime(item.startAt)} → ${shortDateTime(item.endAt)}`;
   const completed = item.endAt <= Date.now() && ["print", "scheduled"].includes(item.type);
   const upcoming = item.startAt > Date.now() && item.startAt - Date.now() <= 60 * 60000 && ["reservation", "scheduled"].includes(item.type);
   const cancel = item.type === "reservation" ? `<button data-cancel-reservation="${printer.id}" data-reservation="${item.reservationId}" aria-label="Rezervasyonu iptal et">×</button>` : "";
@@ -796,6 +831,7 @@ function bindDynamicControls() {
 function showModal(html, onSubmit) {
   $("#modalContent").innerHTML = html;
   $("#modal").classList.remove("hidden");
+  bind24HourInputs();
   const form = $("#modalContent form");
   const actorInput = form?.querySelector('[name="actor"]');
   if (actorInput) actorInput.value = currentUser?.name || rememberedActor;
@@ -1044,7 +1080,7 @@ function scheduledPrintForm(printerId, suggestedStart, preferredSavedJob = null)
     const isPrinting = printers.some(item => item.status === "printing" && item.savedJobId === job.id);
     return `<option value="${job.id}" ${initialJob?.id === job.id ? "selected" : ""}>${isPrinting ? "🟢 BASKIDA · " : ""}${esc(job.name)} · ${durationText(job.duration)}</option>`;
   }).join("")}</select></label>` : "";
-  showModal(`<form class="form"><h2>Planlı baskı ekle</h2><p class="form-intro"><b>${esc(printer.name)}</b> için takvimden bir başlangıç zamanı seçtiniz. Çakışan bir zaman kaydedilemez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label>${savedSelector}<label>Baskı / iş adı<input name="purpose" required value="${esc(initialJob?.name || "")}" placeholder="Örn. Bağlantı braketi"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><fieldset id="scheduledDuration" class="${initialJob ? "duration-locked" : ""}"><legend>Tahmini süre <span>${initialJob ? "· Kayıtlı iş süresi" : ""}</span></legend>${durationFields("duration", initialJob?.duration || 60)}</fieldset><button class="submit">BASKIYI PLANLA</button></form>`, async event => {
+  showModal(`<form class="form"><h2>Planlı baskı ekle</h2><p class="form-intro"><b>${esc(printer.name)}</b> için takvimden bir başlangıç zamanı seçtiniz. Tüm saatler 24 saat biçimindedir; çakışan bir zaman kaydedilemez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label>${savedSelector}<label>Baskı / iş adı<input name="purpose" required value="${esc(initialJob?.name || "")}" placeholder="Örn. Bağlantı braketi"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati (24 saat)${timeField("time", start)}</label></div><fieldset id="scheduledDuration" class="${initialJob ? "duration-locked" : ""}"><legend>Tahmini süre <span>${initialJob ? "· Kayıtlı iş süresi" : ""}</span></legend>${durationFields("duration", initialJob?.duration || 60)}</fieldset><button class="submit">BASKIYI PLANLA</button></form>`, async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
@@ -1052,7 +1088,7 @@ function scheduledPrintForm(printerId, suggestedStart, preferredSavedJob = null)
       const purpose = String(form.get("purpose")).trim();
       const selectedJob = savedJobs.find(item => item.id === String(form.get("savedJob") || ""));
       const duration = selectedJob ? Math.max(1, Number(selectedJob.duration) || 1) : readDuration(form, "duration");
-      const startAt = new Date(`${form.get("date")}T${form.get("time")}`).getTime();
+      const startAt = parseDateTime24(form.get("date"), form.get("time"));
       const endAt = startAt + duration * 60000;
       closeModal();
       await mutate("addScheduledPrint", { printerId, savedJobId: selectedJob?.id || null, reservation: { purpose, owner: actor, startAt, endAt } }, makeEntry("Planlı baskı eklendi", `${purpose} · ${printer.name} · ${dateTime(startAt)}–${timeValue(endAt)}`, actor), "Baskı takvime eklendi");
@@ -1088,14 +1124,14 @@ function reserveForm(id) {
   const printer = printers.find(item => item.id === id);
   const defaultStart = new Date(Date.now() + 60 * 60000);
   defaultStart.setMinutes(0, 0, 0);
-  showModal(`<form class="form"><h2>${esc(printer.name)} rezervasyonu</h2><p class="form-intro">Devam eden baskılar, diğer rezervasyonlar ve planlanmış sıra işleriyle çakışan saatler kabul edilmez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Amaç / iş adı<input name="purpose" required placeholder="Prototip baskısı"></label><div class="form-grid"><label>Tarih<input name="date" required type="date" value="${dateValue(defaultStart)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(defaultStart)}"></label></div><fieldset><legend>Tahmini süre</legend>${durationFields("duration", 60)}</fieldset><button class="submit">REZERVASYONU ONAYLA</button></form>`, async event => {
+  showModal(`<form class="form"><h2>${esc(printer.name)} rezervasyonu</h2><p class="form-intro">Tüm saatler 24 saat biçimindedir. Devam eden baskılar, diğer rezervasyonlar ve planlanmış sıra işleriyle çakışan saatler kabul edilmez.</p><label>Adınız<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>Amaç / iş adı<input name="purpose" required placeholder="Prototip baskısı"></label><div class="form-grid"><label>Tarih<input name="date" required type="date" value="${dateValue(defaultStart)}"></label><label>Başlangıç saati (24 saat)${timeField("time", defaultStart)}</label></div><fieldset><legend>Tahmini süre</legend>${durationFields("duration", 60)}</fieldset><button class="submit">REZERVASYONU ONAYLA</button></form>`, async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
       const actor = String(form.get("actor")).trim();
       const purpose = String(form.get("purpose")).trim();
       const duration = readDuration(form, "duration");
-      const startAt = new Date(`${form.get("date")}T${form.get("time")}`).getTime();
+      const startAt = parseDateTime24(form.get("date"), form.get("time"));
       const endAt = startAt + duration * 60000;
       closeModal();
       await mutate("addReservation", { printerId: id, reservation: { purpose, owner: actor, startAt, endAt } }, makeEntry("Yazıcı rezerve edildi", `${purpose} · ${printer.name} · ${dateTime(startAt)}–${timeValue(endAt)}`, actor), "Rezervasyon kaydedildi");
@@ -1136,13 +1172,13 @@ function editPlannedForm(printerId, reservationId) {
   const scheduled = reservation.kind === "scheduled";
   const start = new Date(reservation.startAt);
   const duration = Math.max(1, Math.round((Number(reservation.endAt) - Number(reservation.startAt)) / 60000));
-  showModal(`<form class="form"><h2>${scheduled ? "Planlı baskıyı" : "Rezervasyonu"} düzenle</h2><p class="form-intro"><b>${esc(printer.name)}</b> · Süre ${durationText(duration)} olarak korunacaktır.</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>${scheduled ? "Baskı / iş adı" : "Amaç / iş adı"}<input name="purpose" required value="${esc(reservation.purpose)}"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati<input name="time" required type="time" value="${timeValue(start)}"></label></div><button class="submit">DEĞİŞİKLİKLERİ KAYDET</button></form>`, async event => {
+  showModal(`<form class="form"><h2>${scheduled ? "Planlı baskıyı" : "Rezervasyonu"} düzenle</h2><p class="form-intro"><b>${esc(printer.name)}</b> · Süre ${durationText(duration)} olarak korunacaktır. Tüm saatler 24 saat biçimindedir.</p><label>İşlemi yapan kişi<input name="actor" required placeholder="Ad soyad" autocomplete="name"></label><label>${scheduled ? "Baskı / iş adı" : "Amaç / iş adı"}<input name="purpose" required value="${esc(reservation.purpose)}"></label><div class="form-grid"><label>Başlangıç tarihi<input name="date" required type="date" value="${dateValue(start)}"></label><label>Başlangıç saati (24 saat)${timeField("time", start)}</label></div><button class="submit">DEĞİŞİKLİKLERİ KAYDET</button></form>`, async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
       const actor = String(form.get("actor")).trim();
       const purpose = String(form.get("purpose")).trim();
-      const startAt = new Date(`${form.get("date")}T${form.get("time")}`).getTime();
+      const startAt = parseDateTime24(form.get("date"), form.get("time"));
       const endAt = startAt + duration * 60000;
       closeModal();
       await mutate("editReservation", { printerId, reservationId, purpose, startAt, endAt }, makeEntry(scheduled ? "Planlı baskı düzenlendi" : "Rezervasyon düzenlendi", `${reservation.purpose} → ${purpose} · ${printer.name} · ${dateTime(startAt)}`, actor), "Planlanan iş güncellendi");
