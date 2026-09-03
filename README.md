@@ -27,8 +27,11 @@ Bu belge uygulamanın teknik yapısını, mevcut Cloudflare kurulumunu, TUSAŞ'a
 - Anlık baskı başlatma, iptal etme ve tamamlama
 - Baskı sırası, planlı baskı ve rezervasyon yönetimi
 - Planlı baskıları takvimde başka saate veya yazıcıya sürükleme
+- Devam eden/planlı baskılarda gecikme, gerçek ilerleme yüzdesi ve erken başlangıç düzeltmesi
+- 08:00–17:00 iş başlangıç saatleri ile hafta sonlarını dikkate alan otomatik planlama
 - Kayıtlı işler ve planlanan/basılmakta olan iş göstergeleri
-- Gün, hafta ve çok haftalı takvim; 24 saatlik saat gösterimi
+- Üç geçmiş günle başlayan 31 günlük takvim, yakınlaştırma ve günlük gezinme
+- Yazıcı bazında baskı sayısı, çalışma saati, ortalama süre ve kullanım istatistikleri
 - Baskı ve işlem geçmişi
 - Kullanıcı kaydı, giriş, çıkış ve “beni hatırla”
 - Yeni kullanıcılar için değişiklik yetkisi onayı
@@ -99,6 +102,8 @@ Yazıcı, iş, rezervasyon, bakım ve takvim değişikliklerini gerçekleştirir
 - Ortak veri değişiklikleri için `can_edit = 1` gerekir.
 - `reorderPrinters` kişisel ayardır; onay bekleyen kullanıcılar da kullanabilir.
 - Sunucu işlem yapan kişinin adını oturumdan alır.
+- `adjustPrintTiming`, gecikmeyi takip eden sıkışık planlara aktarır; 30 dakikadan büyük boşluklar gecikmeyi önce kendi içinde emer.
+- `autoSchedulePrints`, seçilen işleri sıra, mevcut planlar, 08:00–17:00 başlangıç aralığı ve hafta sonlarına göre yerleştirir.
 
 ### `GET /api/auth`
 
@@ -378,6 +383,8 @@ Bunlar kurumun secret manager veya onaylı güvenli aktarım yöntemiyle yöneti
 - [ ] Kullanıcıya özel yazıcı sırası korunuyor
 - [ ] Yazıcı ve baskı işlemleri çalışıyor
 - [ ] Planlı baskı doğru şekilde otomatik başlıyor
+- [ ] Dakika/yüzde ile süre düzeltmesi ve takip eden işlerin kaydırılması doğru
+- [ ] Otomatik ekleme 08:00–17:00 başlangıç aralığını ve hafta sonlarını uyguluyor
 - [ ] Takvim sürükle-bırak çalışıyor
 - [ ] Kayıtlı iş durumları doğru
 - [ ] Yenileme sonrasında veri korunuyor
