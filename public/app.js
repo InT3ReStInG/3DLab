@@ -14,8 +14,9 @@ let reorderOriginal = [];
 let reorderDrag = null;
 let reorderScrollFrame = null;
 let calendarDate = startOfDay(new Date());
-const calendarZoomLevels = [5, 7, 9, 12, 16];
-let calendarZoomIndex = 2;
+const calendarZoomLevels = [1.2, 2, 3.5, 5, 7, 9, 12, 16];
+const calendarZoomPercentages = [10, 25, 40, 60, 80, 100, 130, 170];
+let calendarZoomIndex = 5;
 let calendarSelectedPrinters = new Set();
 let calendarKnownPrinters = new Set();
 let calendarFilterInitialized = false;
@@ -758,7 +759,7 @@ function renderCalendar() {
   const hourWidth = calendarZoomLevels[calendarZoomIndex];
   const selected = printers.filter(printer => calendarSelectedPrinters.has(printer.id));
   $("#calendarTitle").textContent = `${first.toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} – ${addDays(first, dayCount - 1).toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })}`;
-  $("#calendarZoomLabel").textContent = `%${[60, 80, 100, 130, 170][calendarZoomIndex]}`;
+  $("#calendarZoomLabel").textContent = `%${calendarZoomPercentages[calendarZoomIndex]}`;
   $("#calendarZoomOut").disabled = calendarZoomIndex === 0;
   $("#calendarZoomIn").disabled = calendarZoomIndex === calendarZoomLevels.length - 1;
   const timeWidth = totalHours * hourWidth;
@@ -818,7 +819,7 @@ function renderCalendar() {
 
 function horizontalTimeScale(first, totalHours, hourWidth) {
   const dayCount = totalHours / 24;
-  const labelEvery = hourWidth >= 12 ? 2 : hourWidth >= 8 ? 3 : 6;
+  const labelEvery = hourWidth <= 2 ? 24 : hourWidth <= 3.5 ? 12 : hourWidth <= 5 ? 6 : hourWidth >= 12 ? 2 : 3;
   const days = Array.from({ length: dayCount }, (_, index) => {
     const date = addDays(first, index);
     const weekend = date.getDay() === 0 || date.getDay() === 6;
