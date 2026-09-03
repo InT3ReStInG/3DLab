@@ -398,7 +398,8 @@ button { color: inherit; }
 .auto-schedule-form { min-width: min(620px, 78vw); }
 .auto-add-box { padding: 11px !important; border: 1px solid var(--line) !important; border-radius: 9px !important; background: #fafbfc; }
 .auto-add-row, .auto-manual-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
-.auto-manual-row { grid-template-columns: minmax(130px, 1fr) 100px auto; }
+.auto-manual-row { grid-template-columns: minmax(130px, 1fr) 78px 88px auto; align-items: end; }
+.auto-manual-row label { gap: 4px; font-size: 8px; }
 .auto-add-row select, .auto-manual-row input { min-width: 0; }
 .auto-add-row button, .auto-manual-row button { padding: 0 13px; border: 1px solid #cbd8f6; border-radius: 8px; background: #edf4ff; color: var(--blue); font-size: 9px; font-weight: 750; cursor: pointer; }
 .auto-job-list { max-height: 235px; overflow: auto; display: grid; gap: 6px; }
@@ -508,7 +509,8 @@ footer { padding: 24px 2px 30px; display: flex; justify-content: space-between; 
   .modal-card { padding: 25px 20px; }
   .form-grid { grid-template-columns: 1fr; }
   .auto-schedule-form { min-width: 0; }
-  .auto-manual-row { grid-template-columns: 1fr 82px; }
+  .auto-manual-row { grid-template-columns: 1fr 1fr; }
+  #autoManualName { grid-column: 1 / -1; }
   .auto-manual-row button { min-height: 38px; grid-column: 1 / -1; }
   .stats-hero { grid-template-columns: 1fr; }
   footer span:last-child { display: none; }

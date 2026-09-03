@@ -1471,7 +1471,7 @@ function autoScheduleForm() {
   while ([0, 6].includes(workDate.getDay())) workDate.setDate(workDate.getDate() + 1);
   const availablePrinters = printers.filter(printer => !["maintenance", "broken"].includes(printer.status));
   let selectedJobs = [];
-  showModal(`<form class="form auto-schedule-form"><div class="magic-heading"><span>✦</span><div><small>AKILLI PLANLAMA</small><h2>İşleri otomatik ekle</h2></div></div><p class="form-intro">İşler 08:00–17:00 arasında başlatılır. Saat 17:00'den sonraki başlangıçlar ve hafta sonları otomatik olarak sonraki iş gününe aktarılır.</p><div class="form-grid"><label>Yazıcı<select name="printerId" required>${availablePrinters.map(printer => `<option value="${printer.id}">${esc(printer.name)}</option>`).join("")}</select></label><label>İlk iş günü<input name="date" type="date" required value="${dateValue(workDate)}"></label></div><label>İşler arasındaki minimum süre (dakika)<input name="minGap" type="number" min="0" max="1440" value="30" required></label><fieldset class="auto-add-box"><legend>Kayıtlı iş ekle</legend><div class="auto-add-row"><select id="autoSavedSelect"><option value="">Bir kayıtlı iş seçin</option>${savedJobs.map(job => `<option value="${job.id}">${esc(job.name)} · ${durationText(job.duration)}${esc(savedJobPlanningLabel(job))}</option>`).join("")}</select><button type="button" id="autoAddSaved">Ekle</button></div></fieldset><fieldset class="auto-add-box"><legend>Manuel iş ekle</legend><div class="auto-manual-row"><input id="autoManualName" placeholder="İş adı"><input id="autoManualDuration" type="number" min="1" max="43200" placeholder="Dakika"><button type="button" id="autoAddManual">Ekle</button></div></fieldset><div class="auto-job-list" id="autoJobList"></div><button class="submit" id="autoScheduleSubmit" disabled>TAKVİME OTOMATİK YERLEŞTİR</button></form>`, async event => {
+  showModal(`<form class="form auto-schedule-form"><div class="magic-heading"><span>✦</span><div><small>AKILLI PLANLAMA</small><h2>İşleri otomatik ekle</h2></div></div><p class="form-intro">İşler 08:00–17:00 arasında başlatılır. Saat 17:00'den sonraki başlangıçlar ve hafta sonları otomatik olarak sonraki iş gününe aktarılır.</p><div class="form-grid"><label>Yazıcı<select name="printerId" required>${availablePrinters.map(printer => `<option value="${printer.id}">${esc(printer.name)}</option>`).join("")}</select></label><label>İlk iş günü<input name="date" type="date" required value="${dateValue(workDate)}"></label></div><label>İşler arasındaki minimum süre (dakika)<input name="minGap" type="number" min="0" max="1440" value="30" required></label><fieldset class="auto-add-box"><legend>Kayıtlı iş ekle</legend><div class="auto-add-row"><select id="autoSavedSelect"><option value="">Bir kayıtlı iş seçin</option>${savedJobs.map(job => `<option value="${job.id}">${esc(job.name)} · ${durationText(job.duration)}${esc(savedJobPlanningLabel(job))}</option>`).join("")}</select><button type="button" id="autoAddSaved">Ekle</button></div></fieldset><fieldset class="auto-add-box"><legend>Manuel iş ekle</legend><div class="auto-manual-row"><input id="autoManualName" placeholder="İş adı" aria-label="İş adı"><label>Saat<input id="autoManualHours" type="number" min="0" max="720" value="0"></label><label>Dakika<input id="autoManualMinutes" type="number" min="0" max="59" value="30"></label><button type="button" id="autoAddManual">Ekle</button></div></fieldset><div class="auto-job-list" id="autoJobList"></div><button class="submit" id="autoScheduleSubmit" disabled>TAKVİME OTOMATİK YERLEŞTİR</button></form>`, async event => {
     event.preventDefault();
     if (!selectedJobs.length) return toast("En az bir iş ekleyin");
     const form = new FormData(event.currentTarget);
@@ -1514,11 +1514,14 @@ function autoScheduleForm() {
   };
   $("#autoAddManual").onclick = () => {
     const name = $("#autoManualName").value.trim();
-    const duration = Number($("#autoManualDuration").value);
-    if (!name || !Number.isFinite(duration) || duration < 1) return toast("Manuel iş adı ve süresini girin");
-    selectedJobs.push({ name, duration: Math.round(duration), savedJobId: null });
+    const hours = Number($("#autoManualHours").value);
+    const mins = Number($("#autoManualMinutes").value);
+    const duration = Math.round(hours * 60 + mins);
+    if (!name || !Number.isFinite(hours) || !Number.isFinite(mins) || hours < 0 || mins < 0 || mins > 59 || duration < 1 || duration > 43200) return toast("Manuel iş adı, saat ve dakika süresini doğru girin");
+    selectedJobs.push({ name, duration, savedJobId: null });
     $("#autoManualName").value = "";
-    $("#autoManualDuration").value = "";
+    $("#autoManualHours").value = "0";
+    $("#autoManualMinutes").value = "30";
     renderSelectedJobs();
   };
   renderSelectedJobs();
