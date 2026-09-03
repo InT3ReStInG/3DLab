@@ -5,6 +5,8 @@ const json = (body, status = 200, headers = {}) => Response.json(body, {
 
 const overlaps = (startA, endA, startB, endB) => startA < endB && endA > startB;
 const minutes = value => Math.max(1, Math.round(Number(value) || 1));
+const MINUTE = 60000;
+const WORK_TIMEZONE_OFFSET = 3 * 60 * MINUTE;
 const SESSION_COOKIE = "pl750_session";
 const encoder = new TextEncoder();
 
@@ -164,6 +166,82 @@ function busyConflict(printer, startAt, endAt, options = {}) {
     if (queued) return `“${queued.name}” sıralı işi`;
   }
   return null;
+}
+
+function propagateTimingChange(reservations, originalEnd, newEnd, excludedId) {
+  const ordered = reservations
+    .filter(item => item.id !== excludedId)
+    .sort((a, b) => Number(a.startAt) - Number(b.startAt));
+  let oldBoundary = Number(originalEnd);
+  let newBoundary = Number(newEnd);
+  const changed = [];
+  const result = ordered.map(item => {
+    const originalStart = Number(item.startAt);
+    const originalItemEnd = Number(item.endAt);
+    if (originalStart < oldBoundary || newBoundary <= oldBoundary) {
+      oldBoundary = Math.max(oldBoundary, originalItemEnd);
+      newBoundary = Math.max(newBoundary, originalItemEnd);
+      return item;
+    }
+    const inheritedDelay = Math.max(0, newBoundary - oldBoundary);
+    const originalGap = originalStart - oldBoundary;
+    const shift = originalGap <= 30 * MINUTE
+      ? inheritedDelay
+      : Math.max(0, newBoundary - originalStart);
+    const moved = shift ? { ...item, startAt: originalStart + shift, endAt: originalItemEnd + shift } : item;
+    if (shift) changed.push({ id: item.id, minutes: Math.round(shift / MINUTE) });
+    oldBoundary = originalItemEnd;
+    newBoundary = Number(moved.endAt);
+    return moved;
+  });
+  return { reservations: result, changed };
+}
+
+function nextWorkStart(value) {
+  const date = new Date(Number(value) + WORK_TIMEZONE_OFFSET);
+  if (date.getUTCSeconds() || date.getUTCMilliseconds()) date.setUTCMinutes(date.getUTCMinutes() + 1);
+  date.setUTCSeconds(0, 0);
+  while (true) {
+    const day = date.getUTCDay();
+    if (day === 0) {
+      date.setUTCDate(date.getUTCDate() + 1);
+      date.setUTCHours(8, 0, 0, 0);
+      continue;
+    }
+    if (day === 6) {
+      date.setUTCDate(date.getUTCDate() + 2);
+      date.setUTCHours(8, 0, 0, 0);
+      continue;
+    }
+    const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
+    if (hour < 8) date.setUTCHours(8, 0, 0, 0);
+    else if (hour > 17 || (hour === 17 && date.getUTCMinutes() > 0)) {
+      date.setUTCDate(date.getUTCDate() + 1);
+      date.setUTCHours(8, 0, 0, 0);
+      continue;
+    }
+    return date.getTime() - WORK_TIMEZONE_OFFSET;
+  }
+}
+
+function printerBusyIntervals(printer, now = Date.now()) {
+  const intervals = printer.reservations.map(item => ({ startAt: Number(item.startAt), endAt: Number(item.endAt) }));
+  if (printer.status === "printing" && Number(printer.endsAt) > now) {
+    intervals.push({ startAt: Number(printer.startedAt) || now, endAt: Number(printer.endsAt) });
+  }
+  queueSlots(printer, now).forEach(item => intervals.push({ startAt: Number(item.startAt), endAt: Number(item.endAt) }));
+  return intervals.sort((a, b) => a.startAt - b.startAt);
+}
+
+function findAutomaticSlot(candidate, durationMs, busy, gapMs) {
+  let startAt = nextWorkStart(candidate);
+  for (let attempt = 0; attempt < 2000; attempt += 1) {
+    const endAt = startAt + durationMs;
+    const conflict = busy.find(item => overlaps(startAt, endAt, item.startAt - gapMs, item.endAt + gapMs));
+    if (!conflict) return { startAt, endAt };
+    startAt = nextWorkStart(Number(conflict.endAt) + gapMs);
+  }
+  throw new Error("İşler için uygun çalışma zamanı bulunamadı");
 }
 
 async function ensureTable(db) {
@@ -532,6 +610,94 @@ function applyAction(state, body) {
     return;
   }
 
+  if (action === "adjustPrintTiming") {
+    const mode = String(body.mode || "minutes");
+    const value = Number(body.value);
+    if (!Number.isFinite(value) || value <= 0) throw new Error("Geçerli bir süre veya yüzde girin");
+    const reservationId = String(body.reservationId || "");
+    if (reservationId) {
+      const existing = printer.reservations.find(item => item.id === reservationId && item.kind === "scheduled");
+      if (!existing) throw new Error("Planlı baskı bulunamadı");
+      if (mode !== "minutes" || value > 10080) throw new Error("Planlı baskı gecikmesi geçersiz");
+      const delay = Math.round(value) * MINUTE;
+      const moved = { ...existing, startAt: Number(existing.startAt) + delay, endAt: Number(existing.endAt) + delay };
+      const propagated = propagateTimingChange(printer.reservations, existing.endAt, moved.endAt, existing.id);
+      const nextReservations = [...propagated.reservations, moved].sort((a, b) => Number(a.startAt) - Number(b.startAt));
+      replacePrinter(state, { ...printer, reservations: nextReservations });
+      body.timingResult = { changedFollowing: propagated.changed.length, startAt: moved.startAt, endAt: moved.endAt };
+      return;
+    }
+
+    if (printer.status !== "printing" || !Number(printer.startedAt) || !Number(printer.endsAt)) throw new Error("Devam eden baskı bulunamadı");
+    const originalStart = Number(printer.startedAt);
+    const originalEnd = Number(printer.endsAt);
+    let startedAt = originalStart;
+    let endsAt = originalEnd;
+    if (mode === "minutes") {
+      if (value > 10080) throw new Error("Gecikme en fazla 7 gün olabilir");
+      endsAt += Math.round(value) * MINUTE;
+    } else if (mode === "percent") {
+      if (value < 1 || value > 99) throw new Error("İlerleme yüzdesi 1–99 arasında olmalıdır");
+      const elapsed = Math.max(MINUTE, Date.now() - originalStart);
+      endsAt = Math.round((originalStart + elapsed / (value / 100)) / MINUTE) * MINUTE;
+    } else if (mode === "startedEarlier") {
+      if (value > 1440) throw new Error("Erken başlangıç düzeltmesi en fazla 24 saat olabilir");
+      startedAt -= Math.round(value) * MINUTE;
+      endsAt -= Math.round(value) * MINUTE;
+      if (endsAt <= Date.now()) throw new Error("Bu düzeltme baskının bitişini geçmişe taşıyor");
+    } else {
+      throw new Error("Geçersiz süre güncelleme yöntemi");
+    }
+    if (endsAt <= startedAt) throw new Error("Hesaplanan baskı süresi geçersiz");
+    const propagated = propagateTimingChange(printer.reservations, originalEnd, endsAt);
+    replacePrinter(state, {
+      ...printer,
+      startedAt,
+      endsAt,
+      duration: Math.max(1, Math.round((endsAt - startedAt) / MINUTE)),
+      reservations: propagated.reservations,
+    });
+    body.timingResult = { changedFollowing: propagated.changed.length, startedAt, endAt: endsAt };
+    return;
+  }
+
+  if (action === "autoSchedulePrints") {
+    if (["maintenance", "broken"].includes(printer.status)) throw new Error("Servis dışı yazıcıya otomatik plan eklenemez");
+    const requestedJobs = Array.isArray(body.jobs) ? body.jobs : [];
+    if (!requestedJobs.length || requestedJobs.length > 100) throw new Error("1–100 arasında iş seçin");
+    const gapMinutes = Math.max(0, Math.min(1440, Math.round(Number(body.minGap) || 0)));
+    const gapMs = gapMinutes * MINUTE;
+    let candidate = Math.max(Number(body.startAt) || Date.now(), Date.now());
+    let busy = printerBusyIntervals(printer);
+    const created = [];
+    for (const requested of requestedJobs) {
+      const savedJob = requested.savedJobId
+        ? state.savedJobs.find(item => item.id === requested.savedJobId)
+        : null;
+      if (requested.savedJobId && !savedJob) throw new Error("Seçilen kayıtlı işlerden biri bulunamadı");
+      const name = requireText(savedJob?.name || requested.name, "İş adı");
+      const duration = minutes(savedJob?.duration || requested.duration);
+      if (duration > 43200) throw new Error("Tek bir işin süresi en fazla 30 gün olabilir");
+      const slot = findAutomaticSlot(candidate, duration * MINUTE, busy, gapMs);
+      const reservation = {
+        id: crypto.randomUUID(),
+        purpose: name,
+        owner: requireText(body.entry?.user, "Ad"),
+        startAt: slot.startAt,
+        endAt: slot.endAt,
+        kind: "scheduled",
+        savedJobId: savedJob?.id || null,
+      };
+      created.push(reservation);
+      busy.push({ startAt: reservation.startAt, endAt: reservation.endAt });
+      busy.sort((a, b) => a.startAt - b.startAt);
+      candidate = reservation.endAt + gapMs;
+    }
+    replacePrinter(state, { ...printer, reservations: [...printer.reservations, ...created].sort((a, b) => Number(a.startAt) - Number(b.startAt)) });
+    body.createdReservations = created;
+    return;
+  }
+
   if (action === "deleteReservation") {
     replacePrinter(state, { ...printer, reservations: printer.reservations.filter(item => item.id !== body.reservationId) });
     return;
@@ -645,7 +811,13 @@ export async function onRequestPost({ request, env }) {
     };
     state.activity.unshift(body.entry);
     await writeState(env.DB, state);
-    return json({ ok: true, mode: body.resultMode, state: stateForUser(state, user) });
+    return json({
+      ok: true,
+      mode: body.resultMode,
+      timingResult: body.timingResult,
+      createdReservations: body.createdReservations,
+      state: stateForUser(state, user),
+    });
   } catch (error) {
     const status = /çakış|uygun değil|geçmiş|devam eden/.test(error.message || "") ? 409 : 400;
     return json({ error: error.message || "Veritabanı hatası" }, status);
